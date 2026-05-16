@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Enterprise: cool slate canvas + indigo primary */
+    --background: 210 24% 98%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 239 84% 58%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 214 32% 94%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 215 20% 94%;
+    --muted-foreground: 215 16% 40%;
+    --accent: 214 32% 93%;
+    --accent-foreground: 222 47% 11%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 214 26% 88%;
+    --input: 214 26% 88%;
+    --ring: 239 84% 58%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 222 47% 7%;
+    --foreground: 210 40% 98%;
+    --card: 222 47% 9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 47% 9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 239 84% 63%;
+    --primary-foreground: 222 47% 11%;
+    --secondary: 217 33% 14%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217 33% 14%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 217 33% 16%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 63% 45%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217 33% 16%;
+    --input: 217 33% 16%;
+    --ring: 239 84% 63%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
