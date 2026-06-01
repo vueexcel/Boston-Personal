@@ -1,0 +1,44 @@
+# Local prod-like stack: web + worker + Redis (no AWS).
+# Usage: copy .env, then `docker compose up --build`
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: redis://redis:6379
+      NODE_ENV: production
+      VOICE_MEDIA_STREAM_PROXY_VIA_APP: "0"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    ports:
+      - "3001:3001"
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: redis://redis:6379
+      NODE_ENV: production
+      VOICE_MEDIA_STREAM_PROXY_VIA_APP: "0"
+    depends_on:
+      redis:
+        condition: service_healthy

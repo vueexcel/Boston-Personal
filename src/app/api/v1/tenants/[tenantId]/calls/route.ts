@@ -1,11 +1,15 @@
 import { z } from "zod";
 import { errEnvelope, jsonEnvelope, okEnvelope } from "@/lib/api/response";
+import { requireTenantApiAccess } from "@/lib/auth/tenant-access";
 import { listCallsForTenant } from "@/lib/services/calls";
 import { tenantIdSchema } from "@/lib/validation/tenant-id";
 
 const querySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(25),
   cursor: z.string().min(1).optional(),
+  agentId: tenantIdSchema.optional(),
+  from: z.string().min(1).optional(),
+  to: z.string().min(1).optional(),
 });
 
 const paramsSchema = z.object({
@@ -33,6 +37,9 @@ export async function GET(
     );
   }
 
+  const authz = await requireTenantApiAccess(parsedParams.data.tenantId);
+  if (!authz.ok) return authz.response;
+
   const url = new URL(request.url);
   const parsedQuery = querySchema.safeParse(
     Object.fromEntries(url.searchParams.entries()),
@@ -49,13 +56,14 @@ export async function GET(
   }
 
   const { tenantId } = parsedParams.data;
-  const { limit, cursor } = parsedQuery.data;
+  const { limit, cursor, agentId, from, to } = parsedQuery.data;
 
   try {
     const { calls, nextCursor } = await listCallsForTenant(
       tenantId,
       limit,
       cursor,
+      { agentId, from, to },
     );
     return jsonEnvelope(
       okEnvelope({

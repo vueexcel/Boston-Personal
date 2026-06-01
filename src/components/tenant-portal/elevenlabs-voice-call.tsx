@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useConversation } from "@elevenlabs/react";
-import { Mic, PhoneOff } from "lucide-react";
+import { Loader2, Mic, PhoneOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ApiClientError } from "@/lib/api/http";
 
@@ -12,10 +12,18 @@ function errorMessage(e: unknown): string {
   return "Something went wrong";
 }
 
-export function ElevenLabsVoiceCall({ signedUrl }: { signedUrl: string }) {
+export type ElevenLabsVoiceCallProps = {
+  /** Fetches a fresh signed WebSocket URL immediately before connecting. */
+  fetchSignedUrl: () => Promise<string>;
+};
+
+export function ElevenLabsVoiceCall({
+  fetchSignedUrl,
+}: ElevenLabsVoiceCallProps) {
   const [status, setStatus] = React.useState<string>("disconnected");
   const [error, setError] = React.useState<string | null>(null);
   const [active, setActive] = React.useState(false);
+  const [connecting, setConnecting] = React.useState(false);
 
   const conversation = useConversation({
     onConnect: () => {
@@ -37,15 +45,20 @@ export function ElevenLabsVoiceCall({ signedUrl }: { signedUrl: string }) {
   });
 
   const startCall = async () => {
+    if (connecting || active) return;
     setError(null);
+    setConnecting(true);
     try {
       await navigator.mediaDevices.getUserMedia({ audio: true });
+      const signedUrl = await fetchSignedUrl();
       await conversation.startSession({
         signedUrl,
         connectionType: "websocket",
       });
     } catch (e) {
       setError(errorMessage(e));
+    } finally {
+      setConnecting(false);
     }
   };
 
@@ -57,12 +70,6 @@ export function ElevenLabsVoiceCall({ signedUrl }: { signedUrl: string }) {
     }
   };
 
-  React.useEffect(() => {
-    return () => {
-      void conversation.endSession();
-    };
-  }, [conversation]);
-
   return (
     <div className="rounded-lg border border-slate-100 bg-slate-50/80 p-4 space-y-3">
       <p className="text-xs text-slate-500">
@@ -73,10 +80,15 @@ export function ElevenLabsVoiceCall({ signedUrl }: { signedUrl: string }) {
           <Button
             type="button"
             className="bg-slate-900 hover:bg-slate-800"
+            disabled={connecting}
             onClick={() => void startCall()}
           >
-            <Mic className="mr-1.5 h-4 w-4" />
-            Start voice call
+            {connecting ? (
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+            ) : (
+              <Mic className="mr-1.5 h-4 w-4" />
+            )}
+            {connecting ? "Connecting…" : "Start voice call"}
           </Button>
         ) : (
           <Button

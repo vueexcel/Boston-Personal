@@ -71,11 +71,17 @@ export async function resolveConvaiTtsVoiceId(
   preferredVoiceId: string | null | undefined,
 ): Promise<ResolveConvaiVoiceResult> {
   const requested = preferredVoiceId?.trim();
+  const { ids, defaultVoiceId, labels } = await loadAccountVoiceIndex();
+
   if (!requested) {
+    if (defaultVoiceId) {
+      return {
+        voiceId: defaultVoiceId,
+        warning: `No voice selected on this agent. Using ${formatVoiceLabel(defaultVoiceId, labels)} for the test session.`,
+      };
+    }
     return { voiceId: null };
   }
-
-  const { ids, defaultVoiceId, labels } = await loadAccountVoiceIndex();
 
   if (ids.size === 0) {
     return {

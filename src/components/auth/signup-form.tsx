@@ -13,7 +13,6 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { createBrowserSupabase } from "@/lib/auth/supabase/client";
 
 export function SignupForm() {
   const router = useRouter();
@@ -30,33 +29,25 @@ export function SignupForm() {
     setInfo(null);
     setSubmitting(true);
     try {
-      const supabase = createBrowserSupabase();
-      const appUrl =
-        process.env.NEXT_PUBLIC_APP_URL ?? window.location.origin;
-      const { data, error: signErr } = await supabase.auth.signUp({
-        email: email.trim(),
-        password,
-        options: {
-          emailRedirectTo: `${appUrl}/auth/callback?next=/portal`,
-          data: {
-            account_name: accountName.trim() || undefined,
-          },
-        },
+      const res = await fetch("/api/auth/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          email: email.trim(),
+          password,
+          accountName: accountName.trim(),
+        }),
       });
-      if (signErr) {
-        setError(signErr.message);
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(body.error ?? "Sign up failed");
         setSubmitting(false);
         return;
       }
-      if (data.session) {
-        router.push("/portal");
-        router.refresh();
-        return;
-      }
-      setInfo(
-        "Check your email to confirm your address, then sign in. After confirmation you will have a new workspace.",
-      );
-      setSubmitting(false);
+      router.push("/portal");
+      router.refresh();
+      return;
     } catch {
       setError("Something went wrong.");
       setSubmitting(false);

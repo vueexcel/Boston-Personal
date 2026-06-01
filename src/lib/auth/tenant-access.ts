@@ -1,12 +1,9 @@
-import { createServerAuthClient } from "@/lib/auth/supabase/server";
 import { errEnvelope, jsonEnvelope } from "@/lib/api/response";
-import { createServerSupabase } from "@/lib/db/supabase-server";
+import { getSessionUserFromCookies } from "@/lib/auth/session";
+import { queryOne } from "@/lib/db/postgres";
 
 export async function getSessionUserId(): Promise<string | null> {
-  const auth = createServerAuthClient();
-  const {
-    data: { user },
-  } = await auth.auth.getUser();
+  const user = await getSessionUserFromCookies();
   return user?.id ?? null;
 }
 
@@ -14,15 +11,13 @@ export async function userHasTenantAccess(
   userId: string,
   tenantId: string,
 ): Promise<boolean> {
-  const db = createServerSupabase();
-  const { data, error } = await db
-    .from("tenant_members")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("tenant_id", tenantId)
-    .maybeSingle();
-  if (error || !data) return false;
-  return true;
+  const row = await queryOne<{ id: string }>(
+    `SELECT id FROM public.tenant_members
+     WHERE user_id = $1 AND tenant_id = $2
+     LIMIT 1`,
+    [userId, tenantId],
+  );
+  return Boolean(row);
 }
 
 export type TenantApiAuthResult =
@@ -30,7 +25,7 @@ export type TenantApiAuthResult =
   | { ok: false; response: Response };
 
 /**
- * For Route Handlers: require a Supabase session and membership on `tenantId`.
+ * For Route Handlers: require session and membership on `tenantId`.
  */
 export async function requireTenantApiAccess(
   tenantId: string,

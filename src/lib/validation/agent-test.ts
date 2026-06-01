@@ -15,6 +15,7 @@ export const agentTestPortalConfigSchema = z.object({
   knowledgeProducts: z.string().optional(),
   knowledgeFaqs: z.string().optional(),
   knowledgeBaseMode: z.string().optional(),
+  knowledgeBaseId: z.string().uuid().nullable().optional(),
 });
 
 export type AgentTestPortalConfig = z.infer<typeof agentTestPortalConfigSchema>;

@@ -1,7 +1,8 @@
 import { Queue } from "bullmq";
 import { createBullmqConnection } from "@/lib/queue/connection";
 
-const VOICE_EVENTS_QUEUE = "bostel:voice:events";
+/** BullMQ queue names must not contain `:`. */
+export const VOICE_EVENTS_QUEUE = "bostel-voice-events";
 
 let voiceQueue: Queue | null = null;
 

@@ -2,18 +2,29 @@ import { z } from "zod";
 
 const serverEnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).optional(),
-  NEXT_PUBLIC_SUPABASE_URL: z.string().url().optional(),
-  /** Public anon key: browser + cookie-based server client (never use for privileged DB writes). */
-  NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1).optional(),
-  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
+  /** PostgreSQL connection string (AWS RDS or local). Required in production. */
   DATABASE_URL: z.string().min(1).optional(),
+  DATABASE_SSL: z.enum(["0", "1", "true", "false"]).optional(),
+  DATABASE_POOL_MAX: z.coerce.number().int().positive().optional(),
   REDIS_URL: z.string().min(1).optional(),
   TWILIO_ACCOUNT_SID: z.string().min(1).optional(),
   TWILIO_AUTH_TOKEN: z.string().min(1).optional(),
+  /** Canonical HTTPS base for Twilio webhook signature validation (no trailing slash). */
+  TWILIO_WEBHOOK_BASE_URL: z.string().url().optional(),
+  /** Full WSS URL for Twilio Media Streams, e.g. wss://app.example.com/twilio/media-stream */
+  TWILIO_MEDIA_STREAM_WSS_URL: z.string().url().optional(),
+  /** Local media stream worker HTTP port (WebSocket upgrade). */
+  VOICE_MEDIA_STREAM_PORT: z.coerce.number().int().positive().optional(),
+  /** Path segment for media stream WebSocket (default /twilio/media-stream). */
+  TWILIO_MEDIA_STREAM_PATH: z.string().min(1).optional(),
   ELEVENLABS_API_KEY: z.string().min(1).optional(),
   OPENAI_API_KEY: z.string().min(1).optional(),
   /** Default model for call summaries and auxiliary LLM tasks. */
   OPENAI_MODEL: z.string().min(1).optional(),
+  /** Twilio Real-Time Transcription engine: google | deepgram (Twilio-managed). */
+  TWILIO_TRANSCRIPTION_ENGINE: z.enum(["google", "deepgram"]).optional(),
+  /** Speech model for Twilio RTT (e.g. telephony for google). */
+  TWILIO_TRANSCRIPTION_SPEECH_MODEL: z.string().min(1).optional(),
   PORTAL_TENANT_DISPLAY_ID: z.string().min(1).optional(),
   PORTAL_ACCOUNT_STATUS: z.enum(["ACTIVE", "INACTIVE"]).optional(),
 });
@@ -24,11 +35,51 @@ let cached: ServerEnv | null = null;
 
 /**
  * Parses and caches validated server-side environment variables (never exposed to the client).
- *
- * @returns Parsed environment subset used across services.
  */
 export function getServerEnv(): ServerEnv {
   if (cached) return cached;
   cached = serverEnvSchema.parse(process.env);
   return cached;
+}
+
+export function getTwilioMediaStreamWssUrl(): string {
+  if (process.env.VOICE_MEDIA_STREAM_PROXY_VIA_APP === "1") {
+    const base = process.env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/$/, "");
+    if (!base) {
+      throw new Error(
+        "NEXT_PUBLIC_APP_URL is required when VOICE_MEDIA_STREAM_PROXY_VIA_APP=1",
+      );
+    }
+    const wssBase = base.replace(/^https:\/\//i, "wss://").replace(/^http:\/\//i, "wss://");
+    return `${wssBase}${getVoiceMediaStreamPath()}`;
+  }
+
+  const env = getServerEnv();
+  const url = env.TWILIO_MEDIA_STREAM_WSS_URL?.trim();
+  if (!url) {
+    throw new Error("TWILIO_MEDIA_STREAM_WSS_URL is not configured");
+  }
+  return url;
+}
+
+export function getVoiceMediaStreamPort(): number {
+  const env = getServerEnv();
+  return env.VOICE_MEDIA_STREAM_PORT ?? 3001;
+}
+
+export function getVoiceMediaStreamPath(): string {
+  const env = getServerEnv();
+  const path = env.TWILIO_MEDIA_STREAM_PATH?.trim() || "/twilio/media-stream";
+  return path.startsWith("/") ? path : `/${path}`;
+}
+
+export function getTwilioTranscriptionConfig(): {
+  engine: "google" | "deepgram";
+  speechModel: string;
+} {
+  const env = getServerEnv();
+  return {
+    engine: env.TWILIO_TRANSCRIPTION_ENGINE ?? "google",
+    speechModel: env.TWILIO_TRANSCRIPTION_SPEECH_MODEL?.trim() || "telephony",
+  };
 }

@@ -1,12 +1,24 @@
 import { z } from "zod";
 import { createServerSupabase } from "@/lib/db/supabase-server";
+import { queryOne } from "@/lib/db/postgres";
 import {
   callLogItemSchema,
   e164Schema,
   uuidSchema,
   type CallLogItem,
 } from "@/lib/db/schema";
+import {
+  buildTranscriptPlainText,
+  creditsDisplay,
+  dispositionLabel,
+  getMetadataActionItems,
+  getMetadataSentiment,
+  getMetadataString,
+  parseTranscriptTurns,
+  type TranscriptTurn,
+} from "@/lib/services/call-metadata";
 import { refreshTenantMetaCacheAfterWrite } from "@/lib/services/tenant";
+import type { CallSentiment } from "@/lib/services/openai-agent";
 
 function encodeCallCursor(startedAt: string, id: string): string {
   return Buffer.from(JSON.stringify({ startedAt, id }), "utf8").toString(
@@ -73,19 +85,44 @@ function mapCallLogRow(row: Record<string, unknown>): CallLogItem | null {
   return parsed.success ? parsed.data : null;
 }
 
+function agentNameFromRow(row: Record<string, unknown>): string | null {
+  const agents = row.agents;
+  if (agents && typeof agents === "object" && "name" in agents) {
+    const name = (agents as { name?: unknown }).name;
+    return typeof name === "string" ? name : null;
+  }
+  return null;
+}
+
+export type CallLogListItem = CallLogItem & {
+  agentName: string | null;
+  credits: string;
+  dispositionLabel: string;
+};
+
+export type CallLogDetail = CallLogListItem & {
+  transcriptTurns: TranscriptTurn[];
+  sentiment: CallSentiment | null;
+  actionItems: string[];
+  turnCount: number;
+};
+
+export type ListCallsFilters = {
+  agentId?: string | null;
+  from?: string | null;
+  to?: string | null;
+};
+
 /**
- * Lists call logs for a tenant (keyset pagination on `started_at DESC`, `id DESC`).
- *
- * @param tenantId - Authenticated tenant UUID.
- * @param limit - Page size (1–100).
- * @param cursor - Opaque cursor from a previous page.
+ * Lists call logs for a tenant (keyset pagination, optional filters).
  */
 export async function listCallsForTenant(
   tenantId: string,
   limit: number,
   cursor?: string | null,
+  filters?: ListCallsFilters,
 ): Promise<{
-  calls: CallLogItem[];
+  calls: CallLogListItem[];
   nextCursor: string | null;
 }> {
   const supabase = createServerSupabase();
@@ -99,6 +136,15 @@ export async function listCallsForTenant(
     rpcArgs.p_cursor_started_at = decoded.startedAt;
     rpcArgs.p_cursor_id = decoded.id;
   }
+  if (filters?.agentId) {
+    rpcArgs.p_agent_id = filters.agentId;
+  }
+  if (filters?.from) {
+    rpcArgs.p_from = filters.from;
+  }
+  if (filters?.to) {
+    rpcArgs.p_to = filters.to;
+  }
 
   const { data, error } = await supabase.rpc("list_calls_keyset", rpcArgs);
 
@@ -107,12 +153,41 @@ export async function listCallsForTenant(
   }
 
   const rows = (data ?? []) as Record<string, unknown>[];
-  const calls: CallLogItem[] = [];
+  const agentIds = Array.from(
+    new Set(
+      rows
+        .map((r) => r.agent_id)
+        .filter((id): id is string => typeof id === "string"),
+    ),
+  );
+
+  const agentNameById = new Map<string, string>();
+  if (agentIds.length > 0) {
+    const { data: agents } = await supabase
+      .from("agents")
+      .select("id, name")
+      .in("id", agentIds);
+    for (const a of agents ?? []) {
+      if (a.id && a.name) agentNameById.set(String(a.id), String(a.name));
+    }
+  }
+
+  const calls: CallLogListItem[] = [];
   for (const raw of rows) {
     const mapped = mapCallLogRow(raw);
-    if (mapped && mapped.tenantId === tenantId) {
-      calls.push(mapped);
-    }
+    if (!mapped || mapped.tenantId !== tenantId) continue;
+    const meta =
+      mapped.metadata && typeof mapped.metadata === "object"
+        ? (mapped.metadata as Record<string, unknown>)
+        : null;
+    calls.push({
+      ...mapped,
+      agentName: mapped.agentId
+        ? (agentNameById.get(mapped.agentId) ?? null)
+        : null,
+      credits: creditsDisplay(meta, mapped.duration),
+      dispositionLabel: dispositionLabel(mapped.status, mapped.disposition),
+    });
   }
 
   const hasMore = calls.length > limit;
@@ -126,25 +201,102 @@ export async function listCallsForTenant(
   return { calls: page, nextCursor };
 }
 
+export async function getCallLogByProviderId(
+  providerCallId: string,
+): Promise<CallLogItem | null> {
+  const supabase = createServerSupabase();
+  const { data, error } = await supabase
+    .from("call_logs")
+    .select("*")
+    .eq("provider_call_id", providerCallId)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  if (!data) return null;
+  return mapCallLogRow(data as Record<string, unknown>);
+}
+
+export async function getCallDetailForTenant(
+  tenantId: string,
+  callId: string,
+): Promise<CallLogDetail | null> {
+  const joined = await queryOne<Record<string, unknown>>(
+    `SELECT c.*, a.name AS agent_name
+     FROM public.call_logs c
+     LEFT JOIN public.agents a ON a.id = c.agent_id
+     WHERE c.tenant_id = $1 AND c.id = $2 AND c.deleted_at IS NULL`,
+    [tenantId, callId],
+  );
+  if (!joined) return null;
+
+  const raw = {
+    ...joined,
+    agents: joined.agent_name != null ? { name: joined.agent_name } : null,
+  } as Record<string, unknown>;
+  const mapped = mapCallLogRow(raw);
+  if (!mapped) return null;
+
+  const meta =
+    mapped.metadata && typeof mapped.metadata === "object"
+      ? (mapped.metadata as Record<string, unknown>)
+      : {};
+
+  let transcriptTurns = parseTranscriptTurns(meta);
+  if (transcriptTurns.length === 0) {
+    const plain = getMetadataString(meta, "transcript");
+    if (plain) {
+      transcriptTurns = plain
+        .split("\n")
+        .map((line) => {
+          const idx = line.indexOf(": ");
+          if (idx < 0) return null;
+          const role = line.slice(0, idx).trim();
+          const content = line.slice(idx + 2).trim();
+          if (role !== "user" && role !== "assistant") return null;
+          return { role, content } as TranscriptTurn;
+        })
+        .filter((t): t is TranscriptTurn => t != null);
+    }
+  }
+
+  const turnCount =
+    typeof meta.turnCount === "number"
+      ? meta.turnCount
+      : transcriptTurns.length;
+
+  return {
+    ...mapped,
+    agentName: agentNameFromRow(raw),
+    credits: creditsDisplay(meta, mapped.duration),
+    dispositionLabel: dispositionLabel(mapped.status, mapped.disposition),
+    transcriptTurns,
+    sentiment: getMetadataSentiment(meta),
+    actionItems: getMetadataActionItems(meta),
+    turnCount,
+  };
+}
+
 const createCallInputSchema = z.object({
   tenantId: uuidSchema,
   callId: uuidSchema,
   providerCallId: z.string().min(1).max(128),
   callerNumber: z.string().min(3).max(32),
   dialedNumber: e164Schema,
+  agentId: uuidSchema.optional().nullable(),
   startedAt: z.iso.datetime().optional(),
 });
 
 export type CreateCallInput = z.infer<typeof createCallInputSchema>;
 
-/**
- * Inserts a call log row; duplicate `provider_call_id` is ignored (idempotent).
- *
- * @param input - Call identifiers and tenant scope (must match auth context).
- */
+export type CreateCallRecordResult = {
+  created: boolean;
+  duplicate: boolean;
+};
+
 export async function createCallRecordTransact(
   input: CreateCallInput,
-): Promise<void> {
+): Promise<CreateCallRecordResult> {
   const parsed = createCallInputSchema.parse(input);
   const {
     tenantId,
@@ -152,6 +304,7 @@ export async function createCallRecordTransact(
     providerCallId,
     callerNumber,
     dialedNumber,
+    agentId,
     startedAt,
   } = parsed;
   const supabase = createServerSupabase();
@@ -164,7 +317,7 @@ export async function createCallRecordTransact(
     provider_call_id: providerCallId,
     caller_number: callerNumber,
     dialed_number: dialedNumber,
-    agent_id: null,
+    agent_id: agentId ?? null,
     status: "INITIATED",
     duration: null,
     disposition: null,
@@ -182,10 +335,107 @@ export async function createCallRecordTransact(
 
   if (error) {
     if (error.code === "23505") {
-      return;
+      return { created: false, duplicate: true };
     }
     throw new Error(error.message);
   }
 
   await refreshTenantMetaCacheAfterWrite(tenantId);
+  return { created: true, duplicate: false };
 }
+
+async function getCallLogMetadataById(
+  callId: string,
+): Promise<Record<string, unknown>> {
+  const supabase = createServerSupabase();
+  const { data, error } = await supabase
+    .from("call_logs")
+    .select("metadata")
+    .eq("id", callId)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data?.metadata || typeof data.metadata !== "object") return {};
+  return data.metadata as Record<string, unknown>;
+}
+
+export type CallLogPatch = {
+  status?: "INITIATED" | "IN_PROGRESS" | "COMPLETED" | "FAILED" | "MISSED";
+  endedAt?: string | null;
+  duration?: number | null;
+  metadata?: Record<string, unknown> | null;
+  metadataMerge?: boolean;
+  summary?: string | null;
+  disposition?: string | null;
+  recordingUrl?: string | null;
+  callMinutes?: number | null;
+};
+
+async function applyCallLogPatch(
+  filter: { column: "id" | "provider_call_id"; value: string },
+  patch: CallLogPatch,
+  loadMetadata?: () => Promise<Record<string, unknown>>,
+): Promise<void> {
+  const supabase = createServerSupabase();
+
+  let metadataToWrite = patch.metadata;
+  if (patch.metadata !== undefined && patch.metadataMerge && loadMetadata) {
+    const prev = await loadMetadata();
+    metadataToWrite = { ...prev, ...patch.metadata };
+  }
+
+  const row: Record<string, unknown> = {
+    updated_at: new Date().toISOString(),
+  };
+  if (patch.status) row.status = patch.status;
+  if (patch.endedAt !== undefined) row.ended_at = patch.endedAt;
+  if (patch.duration !== undefined) row.duration = patch.duration;
+  if (metadataToWrite !== undefined) row.metadata = metadataToWrite;
+  if (patch.summary !== undefined) row.summary = patch.summary;
+  if (patch.disposition !== undefined) row.disposition = patch.disposition;
+  if (patch.recordingUrl !== undefined) row.recording_url = patch.recordingUrl;
+  if (patch.callMinutes !== undefined) row.call_minutes = patch.callMinutes;
+
+  const { error } = await supabase
+    .from("call_logs")
+    .update(row)
+    .eq(filter.column, filter.value)
+    .is("deleted_at", null);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+export async function updateCallLogById(
+  callId: string,
+  patch: CallLogPatch,
+): Promise<void> {
+  await applyCallLogPatch(
+    { column: "id", value: callId },
+    patch,
+    patch.metadata !== undefined && patch.metadataMerge
+      ? () => getCallLogMetadataById(callId)
+      : undefined,
+  );
+}
+
+export async function updateCallLogByProviderId(
+  providerCallId: string,
+  patch: CallLogPatch,
+): Promise<void> {
+  await applyCallLogPatch(
+    { column: "provider_call_id", value: providerCallId },
+    patch,
+    patch.metadata !== undefined && patch.metadataMerge
+      ? async () => {
+          const existing = await getCallLogByProviderId(providerCallId);
+          return existing?.metadata && typeof existing.metadata === "object"
+            ? (existing.metadata as Record<string, unknown>)
+            : {};
+        }
+      : undefined,
+  );
+}
+
+export { buildTranscriptPlainText };

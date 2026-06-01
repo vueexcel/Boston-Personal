@@ -1,25 +1,10 @@
-import { createServerAuthClient } from "@/lib/auth/supabase/server";
 import { NextResponse } from "next/server";
 
 /**
- * OAuth / magic-link code exchange (PKCE). Email confirmation redirects here when configured in Supabase.
+ * Legacy Supabase email-confirm callback — redirect to login.
  */
-export async function GET(request: Request) {
+export async function GET(request: Request): Promise<Response> {
   const requestUrl = new URL(request.url);
-  const code = requestUrl.searchParams.get("code");
-  const next =
-    requestUrl.searchParams.get("next") ??
-    requestUrl.searchParams.get("redirect_to") ??
-    "/portal";
-
-  if (code) {
-    const supabase = createServerAuthClient();
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
-    if (!error) {
-      return NextResponse.redirect(new URL(next, requestUrl.origin));
-    }
-  }
-
   return NextResponse.redirect(
     new URL("/login?error=auth_callback", requestUrl.origin),
   );

@@ -35,7 +35,10 @@ export type AgentPortalConfigV1 = {
   qualifyingQuestions: string;
   knowledgeProducts?: string;
   knowledgeFaqs?: string;
+  /** @deprecated Use knowledgeBaseId */
   knowledgeBaseMode?: string;
+  /** UUID of attached tenant knowledge base, or null for none. */
+  knowledgeBaseId?: string | null;
 };
 
 export const INFO_COLLECT_SUGGESTIONS = [
@@ -67,6 +70,7 @@ export function defaultAgentPortalConfig(): AgentPortalConfigV1 {
     knowledgeProducts: "",
     knowledgeFaqs: "",
     knowledgeBaseMode: "none",
+    knowledgeBaseId: null,
   };
 }
 
@@ -123,6 +127,10 @@ export function parseAgentPortalConfig(
           typeof raw.knowledgeBaseMode === "string"
             ? raw.knowledgeBaseMode
             : "none",
+        knowledgeBaseId:
+          typeof raw.knowledgeBaseId === "string" && raw.knowledgeBaseId.trim()
+            ? raw.knowledgeBaseId.trim()
+            : null,
       },
       legacyNotes: null,
     };

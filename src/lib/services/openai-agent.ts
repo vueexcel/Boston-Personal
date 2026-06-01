@@ -17,6 +17,8 @@ import {
 import type { AgentTestDraft } from "@/lib/validation/agent-test";
 import { getAgentForTenant } from "@/lib/services/agents";
 import type { AgentDetail } from "@/lib/services/agents";
+import { loadKnowledgeBaseDocumentsForPrompt } from "@/lib/services/knowledge-documents";
+import type { KnowledgeBaseDocumentForPrompt } from "@/lib/services/knowledge-documents";
 
 /** Post-call analysis payload from {@link summarizeCall}. */
 export const callSentimentSchema = z.enum([
@@ -259,14 +261,48 @@ function buildBehaviourBlock(agent: AgentDetail): string {
   });
 }
 
+function formatKnowledgeBaseDocuments(
+  payload: KnowledgeBaseDocumentForPrompt,
+): string {
+  if (payload.documents.length === 0) {
+    return `### Knowledge base: ${payload.knowledgeBaseName}\n\n(No documents in this knowledge base.)`;
+  }
+  const blocks = payload.documents.map((doc, index) => {
+    const label = `Document ${index + 1}`;
+    return `### ${label}\n\n${doc.content.trim()}`;
+  });
+  return [`### Knowledge base: ${payload.knowledgeBaseName}`, "", ...blocks].join(
+    "\n\n",
+  );
+}
+
+async function loadKnowledgeBasePromptBlock(
+  tenantId: string,
+  knowledgeBaseId: string | null | undefined,
+): Promise<string | null> {
+  if (!knowledgeBaseId?.trim()) return null;
+  const payload = await loadKnowledgeBaseDocumentsForPrompt(
+    tenantId,
+    knowledgeBaseId.trim(),
+  );
+  if (!payload) return null;
+  return formatKnowledgeBaseDocuments(payload);
+}
+
 function assembleFullSystemPrompt(
   behaviour: string,
   knowledgeSections: KnowledgeSectionRow[],
   advanced: AgentAdvancedSettingsRow | null,
+  knowledgeBaseBlock?: string | null,
 ): string {
-  const knowledgeDb = formatKnowledgeSections(
+  const sectionKnowledge = formatKnowledgeSections(
     knowledgeSections.filter((s) => s.type !== "safety"),
   );
+  const knowledgeParts = [sectionKnowledge];
+  if (knowledgeBaseBlock?.trim()) {
+    knowledgeParts.push("", knowledgeBaseBlock.trim());
+  }
+  const knowledgeDb = knowledgeParts.join("\n");
   const guardrails = buildGuardrailsBlock(knowledgeSections, advanced);
   return [
     "# Role",
@@ -336,7 +372,16 @@ export async function buildSystemPromptForDraft(
     voiceProviderId: draft.voiceProviderId ?? null,
     language: draft.language ?? null,
   });
-  return assembleFullSystemPrompt(behaviour, knowledgeSections, advanced);
+  const knowledgeBaseBlock = await loadKnowledgeBasePromptBlock(
+    tenantId,
+    draft.portalConfig.knowledgeBaseId,
+  );
+  return assembleFullSystemPrompt(
+    behaviour,
+    knowledgeSections,
+    advanced,
+    knowledgeBaseBlock,
+  );
 }
 
 /**
@@ -390,10 +435,16 @@ export async function generateSystemPrompt(
   const advanced = await loadAgentAdvancedSettings(tenantId, agentId);
 
   const behaviour = buildBehaviourBlock(agent);
+  const { config } = parseAgentPortalConfig(agent.roleDescription);
+  const knowledgeBaseBlock = await loadKnowledgeBasePromptBlock(
+    tenantId,
+    config.knowledgeBaseId,
+  );
   const prompt = assembleFullSystemPrompt(
     behaviour,
     knowledgeSections,
     advanced,
+    knowledgeBaseBlock,
   );
 
   if (options?.persist !== false) {

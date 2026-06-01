@@ -1,77 +1,35 @@
-import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { SESSION_COOKIE } from "@/lib/auth/session-constants";
 
-type CookieToSet = {
-  name: string;
-  value: string;
-  options: CookieOptions;
-};
+/** Cookie presence only — full session validation runs in server layouts/API. */
+function hasSessionCookie(request: NextRequest): boolean {
+  const token = request.cookies.get(SESSION_COOKIE)?.value;
+  return Boolean(token && token.length >= 16);
+}
 
 export async function middleware(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({
-    request: {
-      headers: request.headers,
-    },
+  const response = NextResponse.next({
+    request: { headers: request.headers },
   });
-
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anonKey) {
-    return supabaseResponse;
-  }
-
-  const supabase = createServerClient(url, anonKey, {
-    cookies: {
-      getAll() {
-        return request.cookies.getAll();
-      },
-      setAll(cookiesToSet: CookieToSet[]) {
-        cookiesToSet.forEach(({ name, value }) => {
-          request.cookies.set(name, value);
-        });
-        supabaseResponse = NextResponse.next({
-          request: {
-            headers: request.headers,
-          },
-        });
-        cookiesToSet.forEach(({ name, value, options }) => {
-          supabaseResponse.cookies.set(name, value, options);
-        });
-      },
-    },
-  });
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
 
   const pathname = request.nextUrl.pathname;
+  const loggedIn = hasSessionCookie(request);
 
-  if (pathname.startsWith("/portal") && !user) {
+  if (pathname.startsWith("/portal") && !loggedIn) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/login";
     redirectUrl.searchParams.set(
       "redirect",
       `${pathname}${request.nextUrl.search}`,
     );
-    const redirectResponse = NextResponse.redirect(redirectUrl);
-    supabaseResponse.cookies.getAll().forEach((c) => {
-      redirectResponse.cookies.set(c.name, c.value);
-    });
-    return redirectResponse;
+    return NextResponse.redirect(redirectUrl);
   }
 
-  if ((pathname === "/login" || pathname === "/signup") && user) {
-    const redirectResponse = NextResponse.redirect(
-      new URL("/portal", request.url),
-    );
-    supabaseResponse.cookies.getAll().forEach((c) => {
-      redirectResponse.cookies.set(c.name, c.value);
-    });
-    return redirectResponse;
+  if ((pathname === "/login" || pathname === "/signup") && loggedIn) {
+    return NextResponse.redirect(new URL("/portal", request.url));
   }
 
-  return supabaseResponse;
+  return response;
 }
 
 export const config = {

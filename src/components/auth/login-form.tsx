@@ -13,7 +13,6 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { createBrowserSupabase } from "@/lib/auth/supabase/client";
 
 type LoginFormProps = {
   defaultRedirect?: string;
@@ -43,13 +42,15 @@ export function LoginForm({
     setError(null);
     setSubmitting(true);
     try {
-      const supabase = createBrowserSupabase();
-      const { error: signErr } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ email: email.trim(), password }),
       });
-      if (signErr) {
-        setError(signErr.message);
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(body.error ?? "Sign in failed");
         setSubmitting(false);
         return;
       }

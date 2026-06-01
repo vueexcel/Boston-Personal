@@ -1,5 +1,5 @@
-import { createServerAuthClient } from "@/lib/auth/supabase/server";
-import { createServerSupabase } from "@/lib/db/supabase-server";
+import { getSessionUserFromCookies } from "@/lib/auth/session";
+import { queryOne } from "@/lib/db/postgres";
 import type { TenantPortalAccountStatus } from "@/lib/tenant-portal/demo-context";
 
 export type PortalTenantContext = {
@@ -16,50 +16,44 @@ export type PortalTenantContext = {
 export async function getPortalTenantContextForUserId(
   userId: string,
 ): Promise<PortalTenantContext | null> {
-  const db = createServerSupabase();
-  const { data: member, error: mErr } = await db
-    .from("tenant_members")
-    .select("tenant_id")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
+  const member = await queryOne<{ tenant_id: string }>(
+    `SELECT tenant_id FROM public.tenant_members
+     WHERE user_id = $1
+     ORDER BY created_at ASC
+     LIMIT 1`,
+    [userId],
+  );
+  if (!member?.tenant_id) return null;
 
-  if (mErr || !member?.tenant_id) return null;
+  const tenant = await queryOne<{
+    id: string;
+    external_id: string;
+    account_name: string;
+    status: string;
+  }>(
+    `SELECT id, external_id, account_name, status
+     FROM public.tenants
+     WHERE id = $1 AND deleted_at IS NULL`,
+    [member.tenant_id],
+  );
+  if (!tenant) return null;
 
-  const tenantId = member.tenant_id as string;
-
-  const { data: tenant, error: tErr } = await db
-    .from("tenants")
-    .select("id, external_id, account_name, status")
-    .eq("id", tenantId)
-    .is("deleted_at", null)
-    .maybeSingle();
-
-  if (tErr || !tenant) return null;
-
-  const status = tenant.status as string;
-  const accountStatus: TenantPortalAccountStatus =
-    status === "ACTIVE" ? "ACTIVE" : "INACTIVE";
+  const status =
+    tenant.status === "ACTIVE" || tenant.status === "INACTIVE"
+      ? tenant.status
+      : "ACTIVE";
 
   return {
     userId,
-    tenantId,
-    tenantDisplayId: String(tenant.external_id),
-    accountName: String(tenant.account_name ?? ""),
-    accountStatus,
+    tenantId: tenant.id,
+    tenantDisplayId: tenant.external_id,
+    accountName: tenant.account_name,
+    accountStatus: status,
   };
 }
 
-/**
- * Resolves the signed-in user and their primary tenant (first membership row).
- */
 export async function getPortalTenantContext(): Promise<PortalTenantContext | null> {
-  const auth = createServerAuthClient();
-  const {
-    data: { user },
-    error,
-  } = await auth.auth.getUser();
-  if (error || !user) return null;
+  const user = await getSessionUserFromCookies();
+  if (!user) return null;
   return getPortalTenantContextForUserId(user.id);
 }

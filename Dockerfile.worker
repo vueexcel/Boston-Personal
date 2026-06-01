@@ -1,0 +1,16 @@
+# Twilio Media Streams WebSocket + BullMQ worker
+FROM node:20-alpine AS deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+
+FROM node:20-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=deps /app/node_modules ./node_modules
+COPY package.json package-lock.json ./
+COPY tsconfig.json ./
+COPY src ./src
+EXPOSE 3001
+ENV VOICE_MEDIA_STREAM_PORT=3001
+CMD ["npx", "tsx", "src/lib/queue/workers/run.ts"]

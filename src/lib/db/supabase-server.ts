@@ -1,35 +1,17 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { getServerEnv } from "@/lib/env/server";
+import { createPostgresShim, type PostgresShimClient } from "@/lib/db/postgres-shim";
 
-type GlobalSupabase = typeof globalThis & {
-  __bostelSupabaseServer?: SupabaseClient;
+type GlobalDb = typeof globalThis & {
+  __bostelDb?: PostgresShimClient;
 };
 
 /**
- * Returns a shared Supabase client (service role) for server-side reads/writes.
- * Never import this from client components.
+ * Server-side PostgreSQL client (replaces Supabase service role).
+ * API shape is compatible with existing `.from(...).select(...)` call sites.
  */
-export function createServerSupabase(): SupabaseClient {
-  const g = globalThis as GlobalSupabase;
-  if (g.__bostelSupabaseServer) return g.__bostelSupabaseServer;
-
-  const env = getServerEnv();
-  if (!env.NEXT_PUBLIC_SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
-    throw new Error(
-      "Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY",
-    );
+export function createServerSupabase(): PostgresShimClient {
+  const g = globalThis as GlobalDb;
+  if (!g.__bostelDb) {
+    g.__bostelDb = createPostgresShim();
   }
-
-  const client = createClient(
-    env.NEXT_PUBLIC_SUPABASE_URL,
-    env.SUPABASE_SERVICE_ROLE_KEY,
-    {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-      },
-    },
-  );
-  g.__bostelSupabaseServer = client;
-  return client;
+  return g.__bostelDb;
 }

@@ -56,6 +56,11 @@ import {
   serializeAgentPortalConfig,
 } from "@/lib/tenant-portal/agent-config-v1";
 import { useUpdateAgent } from "@/hooks/use-agents";
+import { useKnowledgeBases } from "@/hooks/use-knowledge-bases";
+import {
+  usePhoneNumbers,
+  useUpdatePhoneNumber,
+} from "@/hooks/use-phone-numbers";
 import {
   useCreateCustomVoiceAndApplyAgent,
   useElevenLabsVoices,
@@ -63,6 +68,7 @@ import {
 } from "@/hooks/use-elevenlabs-voices";
 import { AgentTestPanel } from "@/components/tenant-portal/agent-test-panel";
 import { ApiClientError } from "@/lib/api/http";
+import { formatPhoneNumberDisplay } from "@/lib/utils/phone-format";
 import type { PortalElevenLabsVoice } from "@/lib/services/elevenlabs-voices";
 import type { AgentTestDraft } from "@/lib/validation/agent-test";
 import { cn } from "@/lib/utils";
@@ -147,6 +153,21 @@ function buildFormSnapshot(form: AgentFormSnapshot): string {
     voiceId: form.voiceId.trim(),
     roleDescription: serializeAgentPortalConfig(form.portalConfig),
   });
+}
+
+/** Deep clone so baseline state is not shared with React state (discard/save). */
+function clonePortalConfig(config: AgentPortalConfigV1): AgentPortalConfigV1 {
+  return parseAgentPortalConfig(serializeAgentPortalConfig(config)).config;
+}
+
+/** Voice id when it exists in the loaded ElevenLabs list; otherwise empty (no implicit default). */
+function voiceIdInAccountOrEmpty(
+  voiceId: string,
+  voices: PortalElevenLabsVoice[],
+): string {
+  const trimmed = voiceId.trim();
+  if (!trimmed || voices.length === 0) return "";
+  return voices.some((v) => v.voiceId === trimmed) ? trimmed : "";
 }
 
 function UnsavedChangesBar({
@@ -246,6 +267,15 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
     isPending: elevenVoicesLoading,
     error: voicesQueryError,
   } = useElevenLabsVoices(tenantId);
+  const { data: knowledgeBases = [], isPending: knowledgeBasesLoading } =
+    useKnowledgeBases(tenantId);
+  const { data: phoneNumbers = [], isPending: phoneNumbersLoading } =
+    usePhoneNumbers(tenantId);
+  const updatePhoneMutation = useUpdatePhoneNumber(tenantId);
+  const [phoneAssignError, setPhoneAssignError] = React.useState<string | null>(
+    null,
+  );
+  const [phoneAssigning, setPhoneAssigning] = React.useState(false);
   const elevenVoices = voicesData?.voices ?? [];
   const elevenVoicesError = voicesQueryError
     ? voicesQueryError instanceof ApiClientError
@@ -258,13 +288,15 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
     [agent.roleDescription],
   );
 
+  const initialPortalConfig = clonePortalConfig(parsedInitial.config);
+
   const initialRef = React.useRef({
     name: agent.name,
     status: agent.status,
     greeting: agent.greeting ?? "",
     voiceId: agent.voiceId ?? "",
     language: agent.language ?? "en-US",
-    portalConfig: parsedInitial.config,
+    portalConfig: initialPortalConfig,
   });
 
   const [agentName, setAgentName] = React.useState(initialRef.current.name);
@@ -275,7 +307,7 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
   const [voiceId, setVoiceId] = React.useState(initialRef.current.voiceId);
   const [language] = React.useState(initialRef.current.language);
   const [portalConfig, setPortalConfig] = React.useState<AgentPortalConfigV1>(
-    parsedInitial.config,
+    clonePortalConfig(initialPortalConfig),
   );
   const [customFieldInput, setCustomFieldInput] = React.useState("");
 
@@ -315,19 +347,20 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
 
   React.useEffect(() => {
     const parsed = parseAgentPortalConfig(agent.roleDescription);
+    const nextPortalConfig = clonePortalConfig(parsed.config);
     initialRef.current = {
       name: agent.name,
       status: agent.status,
       greeting: agent.greeting ?? "",
       voiceId: agent.voiceId ?? "",
       language: agent.language ?? "en-US",
-      portalConfig: parsed.config,
+      portalConfig: nextPortalConfig,
     };
     setAgentName(initialRef.current.name);
     setStatus(agentStatusSchema.parse(initialRef.current.status));
     setGreeting(initialRef.current.greeting);
     setVoiceId(initialRef.current.voiceId);
-    setPortalConfig(parsed.config);
+    setPortalConfig(clonePortalConfig(nextPortalConfig));
     setSaveMessage(null);
     setSaveError(null);
     setSaveBaselineKey((k) => k + 1);
@@ -344,24 +377,14 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
     Boolean(voiceId) &&
     !elevenVoices.some((v) => v.voiceId === voiceId);
 
-  const resolvedVoiceId = React.useMemo(() => {
-    if (elevenVoices.length === 0) return voiceId;
-    if (elevenVoices.some((v) => v.voiceId === voiceId)) {
-      return voiceId;
-    }
-    return elevenVoices[0]?.voiceId ?? "";
-  }, [elevenVoices, voiceId]);
-
-  React.useEffect(() => {
-    if (elevenVoicesLoading) return;
-    if (resolvedVoiceId !== voiceId) {
-      setVoiceId(resolvedVoiceId);
-    }
-  }, [elevenVoicesLoading, resolvedVoiceId, voiceId]);
+  const selectedVoiceId = React.useMemo(
+    () => voiceIdInAccountOrEmpty(voiceId, elevenVoices),
+    [elevenVoices, voiceId],
+  );
 
   React.useEffect(() => {
     setPreviewError(null);
-  }, [resolvedVoiceId]);
+  }, [selectedVoiceId]);
 
   React.useEffect(() => {
     return () => {
@@ -375,7 +398,7 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
   }, []);
 
   const playVoicePreview = React.useCallback(async () => {
-    const id = resolvedVoiceId?.trim();
+    const id = selectedVoiceId.trim();
     if (!id) return;
     setPreviewError(null);
     previewAudioRef.current?.pause();
@@ -414,7 +437,7 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
           : "Network error while loading preview",
       );
     }
-  }, [resolvedVoiceId, previewVoiceMutation]);
+  }, [selectedVoiceId, previewVoiceMutation]);
 
   React.useEffect(() => {
     if (!newVoiceFile) {
@@ -645,18 +668,18 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
       name: i.name,
       status: agentStatusSchema.parse(i.status),
       greeting: i.greeting,
-      voiceId: i.voiceId,
+      voiceId: voiceIdInAccountOrEmpty(i.voiceId, elevenVoices),
       portalConfig: i.portalConfig,
     });
     const current = buildFormSnapshot({
       name: agentName,
       status,
       greeting,
-      voiceId,
+      voiceId: voiceIdInAccountOrEmpty(voiceId, elevenVoices),
       portalConfig,
     });
     return current !== saved;
-  }, [agentName, status, greeting, voiceId, portalConfig, saveBaselineKey]);
+  }, [agentName, status, greeting, voiceId, portalConfig, saveBaselineKey, elevenVoices]);
 
   React.useEffect(() => {
     if (!isDirty) return;
@@ -673,10 +696,11 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
     setStatus(agentStatusSchema.parse(i.status));
     setGreeting(i.greeting);
     setVoiceId(i.voiceId);
-    setPortalConfig(i.portalConfig);
+    setPortalConfig(clonePortalConfig(i.portalConfig));
     setLlmTemperature(0.35);
     setSaveMessage(null);
     setSaveError(null);
+    setSaveBaselineKey((k) => k + 1);
   };
 
   const applyAgentToLocalState = React.useCallback(
@@ -688,19 +712,22 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
       voiceId?: string | null;
     }) => {
       const parsedStatus = agentStatusSchema.parse(a.status);
+      const nextPortalConfig = clonePortalConfig(
+        parseAgentPortalConfig(a.roleDescription).config,
+      );
       initialRef.current = {
         ...initialRef.current,
         name: a.name,
         status: parsedStatus,
         greeting: a.greeting ?? "",
         voiceId: a.voiceId ?? "",
-        portalConfig: parseAgentPortalConfig(a.roleDescription).config,
+        portalConfig: nextPortalConfig,
       };
       setAgentName(a.name);
       setStatus(parsedStatus);
       setGreeting(a.greeting ?? "");
       setVoiceId(a.voiceId ?? "");
-      setPortalConfig(parseAgentPortalConfig(a.roleDescription).config);
+      setPortalConfig(clonePortalConfig(nextPortalConfig));
       setSaveBaselineKey((k) => k + 1);
     },
     [],
@@ -763,8 +790,8 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
           status,
           greeting: greeting.trim() || null,
           roleDescription,
-          voiceId: voiceId || null,
-          voiceProviderId: voiceId ? "elevenlabs" : null,
+          voiceId: selectedVoiceId || null,
+          voiceProviderId: selectedVoiceId ? "elevenlabs" : null,
           language: language || "en-US",
         },
       });
@@ -782,8 +809,8 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
       name: agentName.trim(),
       greeting: greeting.trim() || null,
       status,
-      voiceId: voiceId || null,
-      voiceProviderId: voiceId ? "elevenlabs" : null,
+      voiceId: selectedVoiceId || null,
+      voiceProviderId: selectedVoiceId ? "elevenlabs" : null,
       language: language || "en-US",
       portalConfig,
     };
@@ -792,7 +819,7 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
     agentName,
     greeting,
     status,
-    voiceId,
+    selectedVoiceId,
     language,
     portalConfig,
   ]);
@@ -1139,60 +1166,198 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
 
               {sectionCard(
                 "Knowledge Base",
-                "Connect a knowledge base for documents (UI only until integrated).",
+                "Attach a tenant knowledge base so document content is included in the agent system prompt.",
                 <>
                   <Select
-                    value={portalConfig.knowledgeBaseMode ?? "none"}
+                    value={portalConfig.knowledgeBaseId ?? "none"}
                     onValueChange={(v) =>
-                      setPortalConfig((c) => ({ ...c, knowledgeBaseMode: v }))
+                      setPortalConfig((c) => ({
+                        ...c,
+                        knowledgeBaseId: v === "none" ? null : v,
+                        knowledgeBaseMode: v === "none" ? "none" : "attached",
+                      }))
                     }
+                    disabled={knowledgeBasesLoading}
                   >
                     <SelectTrigger className="max-w-xl border-slate-200 bg-white">
-                      <SelectValue />
+                      <SelectValue placeholder="Select knowledge base" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">
                         Don&apos;t use a knowledge base
                       </SelectItem>
-                      <SelectItem value="tenant_kb" disabled>
-                        Tenant knowledge base (soon)
-                      </SelectItem>
+                      {knowledgeBases.map((kb) => (
+                        <SelectItem key={kb.id} value={kb.id}>
+                          {kb.name} ({kb.documentCount} doc
+                          {kb.documentCount === 1 ? "" : "s"})
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
+                  {portalConfig.knowledgeBaseId ? (
+                    <p className="mt-2 text-sm text-slate-600">
+                      Attached:{" "}
+                      <span className="font-medium text-slate-900">
+                        {knowledgeBases.find(
+                          (k) => k.id === portalConfig.knowledgeBaseId,
+                        )?.name ?? "Unknown"}
+                      </span>
+                      {" · "}
+                      <Link
+                        href={`/portal/knowledge/${portalConfig.knowledgeBaseId}`}
+                        className="text-indigo-600 underline-offset-2 hover:underline"
+                      >
+                        Edit knowledge base
+                      </Link>
+                    </p>
+                  ) : null}
+                  <p className="mt-2 text-sm text-slate-500">
+                    <Link
+                      href="/portal/knowledge"
+                      className="text-indigo-600 underline-offset-2 hover:underline"
+                    >
+                      Manage knowledge bases
+                    </Link>
+                  </p>
                 </>,
               )}
             </TabsContent>
 
             <TabsContent value="forwarding" className="mt-6">
               {sectionCard(
-                "Call Forwarding Setup",
-                "Forward calls from your personal number to your agent.",
+                "Inbound phone number",
+                "Assign a Twilio number so inbound calls route to this agent via Media Streams.",
                 <>
-                  <div className="flex flex-col gap-3 rounded-md border border-amber-200 bg-amber-50/90 p-4 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="flex gap-3">
-                      <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" />
-                      <p className="text-sm text-amber-950">
-                        The agent needs a phone number to be attached for call
-                        forwarding.
-                      </p>
+                  {phoneNumbersLoading ? (
+                    <p className="text-sm text-slate-500">Loading numbers…</p>
+                  ) : phoneNumbers.length === 0 ? (
+                    <div className="flex flex-col gap-3 rounded-md border border-amber-200 bg-amber-50/90 p-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex gap-3">
+                        <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" />
+                        <p className="text-sm text-amber-950">
+                          No phone numbers on this account yet. Add one to
+                          receive inbound calls.
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="shrink-0 border border-amber-300 bg-white"
+                        asChild
+                      >
+                        <Link href="/portal/phone-numbers">
+                          Get a number
+                          <ArrowRight className="ml-1 h-4 w-4" />
+                        </Link>
+                      </Button>
                     </div>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      className="shrink-0 border border-amber-300 bg-white"
-                      asChild
-                    >
-                      <Link href="/portal/phone-numbers">
-                        Assign a phone number now
-                        <ArrowRight className="ml-1 h-4 w-4" />
-                      </Link>
-                    </Button>
-                  </div>
-                  <p className="text-xs text-slate-500">
-                    This section is informational only until Twilio / routing
-                    APIs are connected for this tenant.
-                  </p>
+                  ) : (
+                    <>
+                      <Label htmlFor="agent-inbound-phone">
+                        Phone number for this agent
+                      </Label>
+                      <Select
+                        value={
+                          phoneNumbers.find(
+                            (p) => p.assignedAgentId === agent.id,
+                          )?.id ?? "none"
+                        }
+                        disabled={
+                          phoneAssigning || updatePhoneMutation.isPending
+                        }
+                        onValueChange={(value) => {
+                          void (async () => {
+                            setPhoneAssignError(null);
+                            setPhoneAssigning(true);
+                            try {
+                              const currentlyAssigned = phoneNumbers.filter(
+                                (p) => p.assignedAgentId === agent.id,
+                              );
+                              if (value === "none") {
+                                for (const p of currentlyAssigned) {
+                                  await updatePhoneMutation.mutateAsync({
+                                    phoneId: p.id,
+                                    body: { assignedAgentId: null },
+                                  });
+                                }
+                                return;
+                              }
+                              for (const p of currentlyAssigned) {
+                                if (p.id !== value) {
+                                  await updatePhoneMutation.mutateAsync({
+                                    phoneId: p.id,
+                                    body: { assignedAgentId: null },
+                                  });
+                                }
+                              }
+                              await updatePhoneMutation.mutateAsync({
+                                phoneId: value,
+                                body: { assignedAgentId: agent.id },
+                              });
+                            } catch (e) {
+                              setPhoneAssignError(
+                                e instanceof ApiClientError
+                                  ? e.message
+                                  : "Failed to update phone assignment",
+                              );
+                            } finally {
+                              setPhoneAssigning(false);
+                            }
+                          })();
+                        }}
+                      >
+                        <SelectTrigger
+                          id="agent-inbound-phone"
+                          className="border-slate-200 bg-white"
+                        >
+                          <SelectValue placeholder="Select a number" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">
+                            No number assigned
+                          </SelectItem>
+                          {phoneNumbers.map((p) => {
+                            const usedByOther =
+                              p.assignedAgentId &&
+                              p.assignedAgentId !== agent.id;
+                            const suffix = usedByOther
+                              ? " (assigned to another agent)"
+                              : "";
+                            return (
+                              <SelectItem key={p.id} value={p.id}>
+                                {formatPhoneNumberDisplay(p.e164Number)}
+                                {suffix}
+                              </SelectItem>
+                            );
+                          })}
+                        </SelectContent>
+                      </Select>
+                      {phoneNumbers.some(
+                        (p) =>
+                          p.assignedAgentId &&
+                          p.assignedAgentId !== agent.id,
+                      ) ? (
+                        <p className="text-xs text-slate-500">
+                          Selecting a number already used by another agent will
+                          reassign it to this agent.
+                        </p>
+                      ) : null}
+                      {phoneAssignError ? (
+                        <p className="text-sm text-red-600" role="alert">
+                          {phoneAssignError}
+                        </p>
+                      ) : null}
+                      <p className="text-sm text-slate-500">
+                        <Link
+                          href="/portal/phone-numbers"
+                          className="text-indigo-600 underline-offset-2 hover:underline"
+                        >
+                          Manage phone numbers
+                        </Link>
+                      </p>
+                    </>
+                  )}
                 </>,
               )}
             </TabsContent>
@@ -1239,7 +1404,7 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
                   <div className="flex max-w-xl flex-col gap-3 sm:flex-row sm:items-end sm:flex-wrap">
                     <div className="min-w-0 flex-1 basis-[min(100%,18rem)]">
                       <Select
-                        value={resolvedVoiceId || undefined}
+                        value={selectedVoiceId || undefined}
                         onValueChange={setVoiceId}
                         disabled={
                           elevenVoicesLoading ||
@@ -1267,7 +1432,7 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
                         disabled={
                           previewLoading ||
                           elevenVoicesLoading ||
-                          !resolvedVoiceId ||
+                          !selectedVoiceId ||
                           voiceOptionsForSelect.length === 0
                         }
                         onClick={() => void playVoicePreview()}

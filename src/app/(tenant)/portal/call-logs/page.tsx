@@ -1,8 +1,14 @@
 import type { Metadata } from "next";
-import { CallLogsTable } from "@/components/tenant-portal/call-logs-table";
+import { redirect } from "next/navigation";
+import { CallHistoryClient } from "@/components/tenant-portal/call-history-client";
+import { getPortalTenantContext } from "@/lib/auth/portal-context";
 
-export const metadata: Metadata = { title: "Call Logs" };
+export const metadata: Metadata = { title: "Call History" };
 
-export default function CallLogsPage() {
-  return <CallLogsTable />;
+export default async function CallLogsPage() {
+  const ctx = await getPortalTenantContext();
+  if (!ctx) {
+    redirect("/login?redirect=/portal/call-logs");
+  }
+  return <CallHistoryClient tenantId={ctx.tenantId} />;
 }

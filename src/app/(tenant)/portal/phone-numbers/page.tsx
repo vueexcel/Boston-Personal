@@ -1,17 +1,14 @@
 import type { Metadata } from "next";
-import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { redirect } from "next/navigation";
+import { PhoneNumbersClient } from "@/components/tenant-portal/phone-numbers-client";
+import { getPortalTenantContext } from "@/lib/auth/portal-context";
 
 export const metadata: Metadata = { title: "Phone Numbers" };
 
-export default function PhoneNumbersPage() {
-  return (
-    <Card className="border-slate-200/90">
-      <CardHeader>
-        <CardTitle className="text-slate-900">Phone Numbers</CardTitle>
-        <CardDescription>
-          Provision and assign Twilio numbers to routing flows.
-        </CardDescription>
-      </CardHeader>
-    </Card>
-  );
+export default async function PhoneNumbersPage() {
+  const ctx = await getPortalTenantContext();
+  if (!ctx) {
+    redirect("/login?redirect=/portal/phone-numbers");
+  }
+  return <PhoneNumbersClient tenantId={ctx.tenantId} />;
 }

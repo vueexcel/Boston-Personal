@@ -8,7 +8,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { ApiClientError } from "@/lib/api/http";
 import { useAgentTestChat } from "@/hooks/use-agent-test";
-import { getAgentTestSignedUrl } from "@/lib/api/agent-test";
+import {
+  getAgentTestSignedUrl,
+  postAgentTestSync,
+} from "@/lib/api/agent-test";
 import type { AgentTestDraft } from "@/lib/validation/agent-test";
 import { cn } from "@/lib/utils";
 
@@ -62,9 +65,17 @@ export function AgentTestPanel({
   >("idle");
   const [voiceError, setVoiceError] = React.useState<string | null>(null);
   const [voiceWarning, setVoiceWarning] = React.useState<string | null>(null);
-  const [signedUrl, setSignedUrl] = React.useState<string | null>(null);
+  const [voiceReady, setVoiceReady] = React.useState(false);
 
   const draftPayload = isDirty && draft ? draft : undefined;
+
+  const fetchVoiceSignedUrl = React.useCallback(async () => {
+    const result = await getAgentTestSignedUrl(tenantId, agentId, draftPayload);
+    if (result.voiceWarning) {
+      setVoiceWarning(result.voiceWarning);
+    }
+    return result.signedUrl;
+  }, [tenantId, agentId, draftPayload]);
 
   React.useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -142,17 +153,22 @@ export function AgentTestPanel({
     setVoiceError(null);
     setVoiceWarning(null);
     setVoiceStatus("preparing");
-    setSignedUrl(null);
+    setVoiceReady(false);
     try {
-      const result = await getAgentTestSignedUrl(
-        tenantId,
-        agentId,
-        draftPayload,
-      );
-      setSignedUrl(result.signedUrl);
+      const result = await postAgentTestSync(tenantId, agentId, {
+        draft: draftPayload,
+      });
       if (result.voiceWarning) {
         setVoiceWarning(result.voiceWarning);
       }
+      if (!result.resolvedVoiceId) {
+        setVoiceWarning(
+          (prev) =>
+            prev ??
+            "No ElevenLabs voice is configured for this agent. Pick a voice on the Voice tab, save, and prepare again.",
+        );
+      }
+      setVoiceReady(true);
       setVoiceStatus("ready");
     } catch (e) {
       setVoiceStatus("error");
@@ -315,7 +331,7 @@ export function AgentTestPanel({
             <Badge variant="outline" className="border-slate-200">
               Status: {voiceStatus}
             </Badge>
-            {signedUrl ? (
+            {voiceReady ? (
               <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">
                 Ready for call
               </Badge>
@@ -348,7 +364,9 @@ export function AgentTestPanel({
             </p>
           ) : null}
 
-          {signedUrl ? <ElevenLabsVoiceCall signedUrl={signedUrl} /> : null}
+          {voiceReady ? (
+            <ElevenLabsVoiceCall fetchSignedUrl={fetchVoiceSignedUrl} />
+          ) : null}
         </div>
       )}
     </div>

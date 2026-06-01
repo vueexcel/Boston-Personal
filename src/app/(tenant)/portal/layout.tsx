@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { PortalShell } from "@/components/tenant-portal/portal-shell";
-import { createServerAuthClient } from "@/lib/auth/supabase/server";
+import { getSessionUserFromCookies } from "@/lib/auth/session";
 import { getPortalTenantContextForUserId } from "@/lib/auth/portal-context";
 
 export const metadata: Metadata = {
@@ -13,10 +13,7 @@ export default async function PortalLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const auth = createServerAuthClient();
-  const {
-    data: { user },
-  } = await auth.auth.getUser();
+  const user = await getSessionUserFromCookies();
   if (!user) {
     redirect("/login?redirect=/portal");
   }

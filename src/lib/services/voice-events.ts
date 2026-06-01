@@ -22,3 +22,20 @@ export async function enqueueInboundVoiceStarted(input: {
     { removeOnComplete: 1000, attempts: 3, backoff: { type: "exponential", delay: 2000 } },
   );
 }
+
+export async function enqueueInboundVoiceCompleted(input: {
+  tenantId: string;
+  callId: string;
+}): Promise<void> {
+  const queue = getVoiceEventsQueue();
+  await queue.add(
+    "inbound_completed",
+    {
+      tenantId: input.tenantId,
+      callId: input.callId,
+      kind: "inbound_completed" as const,
+      recordedAtUtc: new Date().toISOString(),
+    },
+    { removeOnComplete: 1000, attempts: 3, backoff: { type: "exponential", delay: 2000 } },
+  );
+}

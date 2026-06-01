@@ -6,6 +6,9 @@ const nextConfig = {
   poweredByHeader: false,
   /** Smaller deployable for Docker / Node hosting: https://nextjs.org/docs/app/api-reference/next-config-js/output */
   output: "standalone",
+  experimental: {
+    serverComponentsExternalPackages: ["pg", "bcryptjs"],
+  },
 
   images: {
     remotePatterns: [
