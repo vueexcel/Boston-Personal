@@ -8,7 +8,6 @@ import {
   buildTranscriptTurns,
 } from "@/lib/services/call-metadata";
 import {
-  getCallLogByProviderId,
   updateCallLogById,
   updateCallLogByProviderId,
   type CallLogPatch,
@@ -84,35 +83,6 @@ export async function POST(request: Request): Promise<Response> {
     };
 
     if (mapped === "COMPLETED" || mapped === "FAILED" || mapped === "MISSED") {
-      const existingBefore = session?.callLogId
-        ? true
-        : Boolean(await getCallLogByProviderId(callSid));
-      // #region agent log
-      fetch(
-        "http://127.0.0.1:7522/ingest/6ccd5abb-3acd-4321-b624-ee504b3cedee",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Debug-Session-Id": "33b5f3",
-          },
-          body: JSON.stringify({
-            sessionId: "33b5f3",
-            location: "voice/status/route.ts:beforeUpdate",
-            message: "status update call log",
-            data: {
-              callSidPrefix: callSid.slice(0, 10),
-              mapped,
-              hadCallLogRow: existingBefore,
-              callLogIdPrefix: session?.callLogId?.slice(0, 8),
-              turnCount: session?.turnCount ?? 0,
-            },
-            timestamp: Date.now(),
-            hypothesisId: "H5",
-          }),
-        },
-      ).catch(() => {});
-      // #endregion
       await applyCallLogPatch({
         status: mapped,
         endedAt: new Date().toISOString(),

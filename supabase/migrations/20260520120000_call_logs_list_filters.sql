@@ -28,5 +28,13 @@ AS $$
   LIMIT p_limit;
 $$;
 
-COMMENT ON FUNCTION public.list_calls_keyset IS
+COMMENT ON FUNCTION public.list_calls_keyset(
+  uuid,
+  integer,
+  timestamptz,
+  uuid,
+  uuid,
+  timestamptz,
+  timestamptz
+) IS
   'Keyset-paginated call_logs for a tenant with optional agent and date range filters.';

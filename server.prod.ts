@@ -24,6 +24,45 @@ const internalPort = Number.parseInt(
 const standaloneDir = path.join(process.cwd(), ".next", "standalone");
 const proxyMode = isMediaStreamProxiedViaApp();
 
+function firstHeader(
+  value: string | string[] | undefined,
+): string | undefined {
+  if (value === undefined) return undefined;
+  return Array.isArray(value) ? value[0] : value;
+}
+
+/** Preserve public host/proto for Next (middleware redirects) when proxying internally. */
+function buildProxyHeaders(
+  req: http.IncomingMessage,
+): http.OutgoingHttpHeaders {
+  const publicHost =
+    firstHeader(req.headers["x-forwarded-host"]) ??
+    firstHeader(req.headers.host);
+  const publicProto =
+    firstHeader(req.headers["x-forwarded-proto"]) ??
+    ((req.socket as { encrypted?: boolean }).encrypted ? "https" : "http");
+
+  const headers: http.OutgoingHttpHeaders = {
+    ...req.headers,
+    host: `127.0.0.1:${internalPort}`,
+  };
+
+  if (publicHost && !publicHost.startsWith("127.0.0.1")) {
+    headers["x-forwarded-host"] = publicHost;
+  }
+  if (publicProto) {
+    headers["x-forwarded-proto"] = publicProto;
+  }
+  const forwardedFor = firstHeader(req.headers["x-forwarded-for"]);
+  if (forwardedFor) {
+    headers["x-forwarded-for"] = forwardedFor;
+  } else if (req.socket.remoteAddress) {
+    headers["x-forwarded-for"] = req.socket.remoteAddress;
+  }
+
+  return headers;
+}
+
 function spawnStandalone(port: number, bindHost: string): ChildProcess {
   return spawn("node", ["server.js"], {
     cwd: standaloneDir,
@@ -46,7 +85,7 @@ function proxyToNext(
     `http://127.0.0.1:${internalPort}`,
   );
 
-  const headers = { ...req.headers, host: `127.0.0.1:${internalPort}` };
+  const headers = buildProxyHeaders(req);
 
   const proxyReq = http.request(
     {

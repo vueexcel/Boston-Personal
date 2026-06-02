@@ -95,27 +95,6 @@ export class MediaStreamSttBuffer {
             textLen: text.length,
           });
         }
-        // #region agent log
-        fetch(
-          "http://127.0.0.1:7522/ingest/6ccd5abb-3acd-4321-b624-ee504b3cedee",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Debug-Session-Id": "33b5f3",
-            },
-            body: JSON.stringify({
-              sessionId: "33b5f3",
-              runId: "post-fix",
-              location: "media-stream-stt.ts:transcript",
-              message: "media STT transcript",
-              data: { reason, textLen: text.length },
-              timestamp: Date.now(),
-              hypothesisId: "H4",
-            }),
-          },
-        ).catch(() => {});
-        // #endregion
         this.onTranscript(text);
       }
     } catch (e) {

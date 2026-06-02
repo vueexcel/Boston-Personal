@@ -23,26 +23,22 @@ export function attachTwilioMediaStreamUpgrade(server: http.Server): void {
       if (reqPath.startsWith("/_next")) {
         return;
       }
-      // #region agent log
       agentDebugLog({
         location: "twilio-media-stream-server.ts:upgrade",
         message: "ws upgrade path rejected",
         hypothesisId: "H3",
         data: { reqPath, expectedPath: path },
       });
-      // #endregion
       socket.destroy();
       return;
     }
 
-    // #region agent log
     agentDebugLog({
       location: "twilio-media-stream-server.ts:upgrade",
       message: "ws upgrade accepted",
       hypothesisId: "H3",
       data: { reqPath: url.pathname },
     });
-    // #endregion
 
     wss.handleUpgrade(request, socket, head, (ws) => {
       wss.emit("connection", ws, request);

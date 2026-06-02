@@ -1,5 +1,3 @@
-import "server-only";
-
 import pg from "pg";
 
 const { Pool } = pg;
@@ -19,7 +17,7 @@ export function getDatabaseUrl(): string {
 }
 
 /**
- * Shared PostgreSQL pool (server-only). Uses DATABASE_URL.
+ * Shared PostgreSQL pool for Node server runtimes. Uses DATABASE_URL.
  */
 export function getPgPool(): pg.Pool {
   const g = globalThis as GlobalPg;

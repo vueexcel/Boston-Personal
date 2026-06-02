@@ -78,7 +78,6 @@ export async function resolveInboundCallDetailed(
   const phone = await loadActivePhoneRow(toE164);
 
   if (!phone.ok) {
-    // #region agent log
     agentDebugLog({
       location: "phone-routing.ts",
       message: "route failed",
@@ -90,7 +89,6 @@ export async function resolveInboundCallDetailed(
         fromSuffix: fromE164.slice(-4),
       },
     });
-    // #endregion
     return { ok: false, reason: phone.reason };
   }
 
@@ -106,39 +104,33 @@ export async function resolveInboundCallDetailed(
     typeof data.e164_number === "string" ? data.e164_number : normalized;
 
   if (!tenantId || !phoneNumberId) {
-    // #region agent log
     agentDebugLog({
       location: "phone-routing.ts",
       message: "route failed",
       hypothesisId: "H2",
       data: { reason: "db_error", toNormalized: normalized.slice(-4) },
     });
-    // #endregion
     return { ok: false, reason: "db_error" };
   }
 
   if (!agentId) {
-    // #region agent log
     agentDebugLog({
       location: "phone-routing.ts",
       message: "route failed",
       hypothesisId: "H2",
       data: { reason: "no_assigned_agent", toNormalized: normalized.slice(-4) },
     });
-    // #endregion
     return { ok: false, reason: "no_assigned_agent" };
   }
 
   const active = await isTenantActive(tenantId);
   if (!active) {
-    // #region agent log
     agentDebugLog({
       location: "phone-routing.ts",
       message: "route failed",
       hypothesisId: "H2",
       data: { reason: "inactive_tenant", toNormalized: normalized.slice(-4) },
     });
-    // #endregion
     return { ok: false, reason: "inactive_tenant" };
   }
 
@@ -155,7 +147,6 @@ export async function resolveInboundCallDetailed(
     return { ok: false, reason: "db_error" };
   }
   if (!agent || agent.status !== "ACTIVE") {
-    // #region agent log
     agentDebugLog({
       location: "phone-routing.ts",
       message: "route failed",
@@ -167,7 +158,6 @@ export async function resolveInboundCallDetailed(
           typeof agent?.status === "string" ? agent.status : "missing",
       },
     });
-    // #endregion
     return { ok: false, reason: "inactive_agent" };
   }
 

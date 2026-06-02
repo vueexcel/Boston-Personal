@@ -8,6 +8,8 @@ const nextConfig = {
   output: "standalone",
   experimental: {
     serverComponentsExternalPackages: ["pg", "bcryptjs"],
+    /** Trust X-Forwarded-Host/Proto from Caddy and server.prod when proxied. */
+    trustHost: true,
   },
 
   images: {

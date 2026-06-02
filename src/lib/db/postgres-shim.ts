@@ -136,14 +136,14 @@ class TableQuery {
   }
 
   async maybeSingle(): Promise<ShimResult<Record<string, unknown>>> {
-    const r = await this.runSelect(1);
+    const r = await this.execute();
     if (r.error) return { data: null, error: r.error };
     const row = r.data?.[0] ?? null;
     return { data: row, error: null };
   }
 
   async single(): Promise<ShimResult<Record<string, unknown>>> {
-    const r = await this.runSelect(1);
+    const r = await this.execute();
     if (r.error) return { data: null, error: r.error };
     const row = r.data?.[0];
     if (!row) {

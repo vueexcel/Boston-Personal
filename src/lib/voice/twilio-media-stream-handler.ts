@@ -170,28 +170,6 @@ export class TwilioMediaStreamHandler {
   }
 
   private async onCallerSpeech(message: CallerUtteranceMessage): Promise<void> {
-    // #region agent log
-    fetch("http://127.0.0.1:7522/ingest/6ccd5abb-3acd-4321-b624-ee504b3cedee", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "33b5f3",
-      },
-      body: JSON.stringify({
-        sessionId: "33b5f3",
-        location: "twilio-media-stream-handler.ts:onCallerSpeech",
-        message: "redis utterance received",
-        data: {
-          state: this.state,
-          final: message.final,
-          textLen: message.text.length,
-          stability: message.stability,
-        },
-        timestamp: Date.now(),
-        hypothesisId: "H3",
-      }),
-    }).catch(() => {});
-    // #endregion
     const event = {
       text: message.text,
       final: message.final,
@@ -282,27 +260,6 @@ export class TwilioMediaStreamHandler {
 
   private async runTurn(transcript: string): Promise<void> {
     if (!this.session || !this.callSid) return;
-    // #region agent log
-    fetch("http://127.0.0.1:7522/ingest/6ccd5abb-3acd-4321-b624-ee504b3cedee", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "33b5f3",
-      },
-      body: JSON.stringify({
-        sessionId: "33b5f3",
-        location: "twilio-media-stream-handler.ts:runTurn",
-        message: "starting LLM turn",
-        data: {
-          transcriptLen: transcript.length,
-          turnCount: this.session.turnCount,
-          state: this.state,
-        },
-        timestamp: Date.now(),
-        hypothesisId: "H4",
-      }),
-    }).catch(() => {});
-    // #endregion
 
     if (this.session.turnCount >= MAX_TURNS) {
       await this.endCall("Thanks for calling. Goodbye.");

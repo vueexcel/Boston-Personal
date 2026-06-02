@@ -1,7 +1,3 @@
-const DEBUG_ENDPOINT =
-  "http://127.0.0.1:7522/ingest/6ccd5abb-3acd-4321-b624-ee504b3cedee";
-const DEBUG_SESSION_ID = "33b5f3";
-
 export type AgentDebugPayload = {
   location: string;
   message: string;
@@ -18,7 +14,6 @@ function isVoiceDebugEnabled(): boolean {
 export function agentDebugLog(payload: AgentDebugPayload): void {
   if (!isVoiceDebugEnabled()) return;
 
-  // #region agent log
   console.log(
     "[bostel-voice]",
     payload.location,
@@ -26,19 +21,6 @@ export function agentDebugLog(payload: AgentDebugPayload): void {
     payload.hypothesisId,
     payload.data ?? {},
   );
-  fetch(DEBUG_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Debug-Session-Id": DEBUG_SESSION_ID,
-    },
-    body: JSON.stringify({
-      sessionId: DEBUG_SESSION_ID,
-      timestamp: Date.now(),
-      ...payload,
-    }),
-  }).catch(() => {});
-  // #endregion
 }
 
 export function wssHost(url: string): string {

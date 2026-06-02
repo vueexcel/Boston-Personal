@@ -69,21 +69,29 @@ export async function POST(request: Request): Promise<Response> {
 
   const sigOk = verifyTwilioWebhookSignature(url, signature, flat);
   if (!sigOk) {
-    // #region agent log
+    const envSid = process.env.TWILIO_ACCOUNT_SID?.trim();
+    const webhookSid = flat.AccountSid?.trim();
+    if (envSid && webhookSid && envSid !== webhookSid) {
+      console.warn(
+        "[bostel-voice] Twilio AccountSid mismatch — webhooks are signed with the phone number's account token, not TWILIO_ACCOUNT_SID in .env",
+        {
+          envAccountSidPrefix: envSid.slice(0, 8),
+          webhookAccountSidPrefix: webhookSid.slice(0, 8),
+        },
+      );
+    }
     agentDebugLog({
       location: "voice/route.ts:sig",
       message: "signature rejected",
       hypothesisId: "H1",
       data: { webhookHost: wssHost(url.replace(/^http/, "https")) },
     });
-    // #endregion
     finish("forbidden");
     return new Response("Forbidden", { status: 403 });
   }
 
   const to = flat["To"];
   const from = flat["From"] ?? "unknown";
-  // #region agent log
   agentDebugLog({
     location: "voice/route.ts:entry",
     message: "voice webhook accepted",
@@ -94,7 +102,6 @@ export async function POST(request: Request): Promise<Response> {
       webhookPath: new URL(url).pathname,
     },
   });
-  // #endregion
   if (!to) {
     finish("no-to");
     return twimlResponse(inactiveTenantTwiML("Unable to route this call."));
@@ -115,7 +122,6 @@ export async function POST(request: Request): Promise<Response> {
 
   if (!routeResult.ok || !callSid) {
     const reason = routeResult.ok ? "db_error" : routeResult.reason;
-    // #region agent log
     agentDebugLog({
       location: "voice/route.ts:route",
       message: "inbound not routed",
@@ -127,7 +133,6 @@ export async function POST(request: Request): Promise<Response> {
         toSuffix: normalizeInboundToE164(to).slice(-4),
       },
     });
-    // #endregion
     finish("route-failed", { reason });
     return twimlResponse(spokenMessageTwiML(inboundRouteFailureMessage(reason)));
   }
@@ -156,7 +161,7 @@ export async function POST(request: Request): Promise<Response> {
     });
 
     try {
-      const callLogResult = await createCallRecordTransact({
+      await createCallRecordTransact({
         tenantId: resolution.tenantId,
         callId: callLogId,
         providerCallId: callSid,
@@ -164,61 +169,9 @@ export async function POST(request: Request): Promise<Response> {
         dialedNumber: resolution.e164Number,
         agentId: resolution.agentId,
       });
-      // #region agent log
-      fetch(
-        "http://127.0.0.1:7522/ingest/6ccd5abb-3acd-4321-b624-ee504b3cedee",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Debug-Session-Id": "33b5f3",
-          },
-          body: JSON.stringify({
-            sessionId: "33b5f3",
-            location: "voice/route.ts:callLog",
-            message: callLogResult.created
-              ? "call_logs insert ok"
-              : "call_logs insert duplicate",
-            data: {
-              callSidPrefix: callSid.slice(0, 10),
-              callLogIdPrefix: callLogId.slice(0, 8),
-              tenantIdPrefix: resolution.tenantId.slice(0, 8),
-              created: callLogResult.created,
-              duplicate: callLogResult.duplicate,
-            },
-            timestamp: Date.now(),
-            hypothesisId: "H5",
-          }),
-        },
-      ).catch(() => {});
-      // #endregion
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "call log failed";
       console.error("[bostel-voice] createCallRecordTransact", message);
-      // #region agent log
-      fetch(
-        "http://127.0.0.1:7522/ingest/6ccd5abb-3acd-4321-b624-ee504b3cedee",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Debug-Session-Id": "33b5f3",
-          },
-          body: JSON.stringify({
-            sessionId: "33b5f3",
-            location: "voice/route.ts:callLog",
-            message: "call_logs insert failed",
-            data: {
-              callSidPrefix: callSid.slice(0, 10),
-              error: message,
-              fromSuffix: from.slice(-4),
-            },
-            timestamp: Date.now(),
-            hypothesisId: "H5",
-          }),
-        },
-      ).catch(() => {});
-      // #endregion
     }
 
     const streamUrl = getTwilioMediaStreamWssUrl();
@@ -230,7 +183,6 @@ export async function POST(request: Request): Promise<Response> {
       recordingCallbackUrl: recordingUrl,
       languageCode: agentSnapshot.sttLanguage,
     });
-    // #region agent log
     agentDebugLog({
       location: "voice/route.ts:twiml",
       message: "returning media stream TwiML",
@@ -244,7 +196,6 @@ export async function POST(request: Request): Promise<Response> {
         agentIdPrefix: resolution.agentId.slice(0, 8),
       },
     });
-    // #endregion
     finish("twiml-media-stream", {
       streamHost: wssHost(streamUrl),
       streamIsLocal: isLocalOrPrivateWss(streamUrl),
@@ -255,14 +206,12 @@ export async function POST(request: Request): Promise<Response> {
       e instanceof Error
         ? e.message
         : "Unable to start the voice agent.";
-    // #region agent log
     agentDebugLog({
       location: "voice/route.ts:catch",
       message: "voice handler error",
       hypothesisId: "H4",
       data: { error: message },
     });
-    // #endregion
     console.error("[twilio/voice]", message);
     finish("handler-error", { error: message });
     return twimlResponse(

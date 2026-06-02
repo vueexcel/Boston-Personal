@@ -25,50 +25,10 @@ export async function POST(request: Request): Promise<Response> {
   const url = getTwilioSignatureUrl(request);
 
   if (!verifyTwilioWebhookSignature(url, signature, flat)) {
-    // #region agent log
-    fetch("http://127.0.0.1:7522/ingest/6ccd5abb-3acd-4321-b624-ee504b3cedee", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "33b5f3",
-      },
-      body: JSON.stringify({
-        sessionId: "33b5f3",
-        location: "transcription/route.ts:sig",
-        message: "transcription signature rejected",
-        data: { path: new URL(url).pathname },
-        timestamp: Date.now(),
-        hypothesisId: "H1",
-      }),
-    }).catch(() => {});
-    // #endregion
     return new Response("Forbidden", { status: 403 });
   }
 
   const parsed = parseTwilioTranscriptionWebhook(flat);
-  // #region agent log
-  fetch("http://127.0.0.1:7522/ingest/6ccd5abb-3acd-4321-b624-ee504b3cedee", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Debug-Session-Id": "33b5f3",
-    },
-    body: JSON.stringify({
-      sessionId: "33b5f3",
-      location: "transcription/route.ts:entry",
-      message: "transcription webhook received",
-      data: {
-        event: parsed.transcriptionEvent,
-        track: parsed.track,
-        final: parsed.final,
-        callSidPrefix: parsed.callSid?.slice(0, 10),
-        hasData: Boolean(parsed.transcriptionDataRaw),
-      },
-      timestamp: Date.now(),
-      hypothesisId: "H1",
-    }),
-  }).catch(() => {});
-  // #endregion
 
   if (parsed.transcriptionEvent === "transcription-error") {
     agentDebugLog({
@@ -126,28 +86,6 @@ export async function POST(request: Request): Promise<Response> {
       final: parsed.final,
       stability: data.stability,
     });
-    // #region agent log
-    fetch("http://127.0.0.1:7522/ingest/6ccd5abb-3acd-4321-b624-ee504b3cedee", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "33b5f3",
-      },
-      body: JSON.stringify({
-        sessionId: "33b5f3",
-        location: "transcription/route.ts:published",
-        message: "utterance published to redis",
-        data: {
-          callSidPrefix: callSid.slice(0, 10),
-          final: parsed.final,
-          textLen: data.transcript.length,
-          stability: data.stability,
-        },
-        timestamp: Date.now(),
-        hypothesisId: "H3",
-      }),
-    }).catch(() => {});
-    // #endregion
   } catch (e) {
     console.error("[twilio/voice/transcription] publish failed", e);
   }
