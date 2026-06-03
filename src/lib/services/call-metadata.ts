@@ -95,6 +95,16 @@ export function creditsDisplay(
   metadata: Record<string, unknown> | null | undefined,
   durationSec: number | null,
 ): string {
+  const insights = metadata?.twilioInsights;
+  if (insights && typeof insights === "object") {
+    const o = insights as Record<string, unknown>;
+    const price = o.price;
+    if (typeof price === "string" && price.trim() && price !== "0") {
+      const unit =
+        typeof o.priceUnit === "string" ? o.priceUnit : "USD";
+      return `${price} ${unit}`;
+    }
+  }
   const price = metadata?.twilioPrice;
   if (typeof price === "string" && price.trim()) {
     const unit =

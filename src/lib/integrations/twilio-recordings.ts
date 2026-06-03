@@ -1,22 +1,29 @@
+import {
+  fetchTwilioCallInsights,
+  type TwilioCallInsights,
+} from "@/lib/integrations/twilio-call-logs";
 import { getTwilioClient } from "@/lib/integrations/twilio";
 
+export type { TwilioCallInsights };
+
 /**
- * Fetches Twilio call price metadata for the credits column.
+ * Fetches Twilio call metadata for the credits column and call insights panel.
  */
 export async function fetchTwilioCallPrice(callSid: string): Promise<{
   price: string | null;
   priceUnit: string | null;
   duration: number | null;
+  insights: TwilioCallInsights | null;
 }> {
-  const client = getTwilioClient();
-  const call = await client.calls(callSid).fetch();
+  const insights = await fetchTwilioCallInsights(callSid);
+  if (!insights) {
+    return { price: null, priceUnit: null, duration: null, insights: null };
+  }
   return {
-    price: call.price ?? null,
-    priceUnit: call.priceUnit ?? null,
-    duration:
-      call.duration != null && !Number.isNaN(Number(call.duration))
-        ? Number(call.duration)
-        : null,
+    price: insights.price,
+    priceUnit: insights.priceUnit,
+    duration: insights.durationSeconds,
+    insights,
   };
 }
 

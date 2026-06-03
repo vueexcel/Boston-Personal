@@ -13,6 +13,7 @@ import {
 import { callRecordingUrl } from "@/lib/api/calls";
 import { getMetadataString } from "@/lib/services/call-metadata";
 import { useCall } from "@/hooks/use-calls";
+import { twilioStatusBadgeVariant } from "@/lib/utils/twilio-call-display";
 import { cn } from "@/lib/utils";
 import { formatPhoneNumberDisplay } from "@/lib/utils/phone-format";
 
@@ -30,13 +31,15 @@ function formatDuration(sec: number | null): string {
   return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 }
 
-function formatDateTime(iso: string): string {
+function formatDateTime(iso: string | null | undefined): string {
+  if (!iso) return "—";
   return new Date(iso).toLocaleString(undefined, {
     month: "short",
     day: "numeric",
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
+    second: "2-digit",
   });
 }
 
@@ -73,12 +76,16 @@ export function CallDetailSheet({
   );
 
   const sentiment = sentimentLabel(call?.sentiment ?? null);
+  const twilio = call?.twilio;
+  const twilioDisplay = call?.twilioDisplay;
+  const durationSec =
+    call?.duration ?? twilio?.durationSeconds ?? null;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
         <SheetHeader>
-          <SheetTitle>Call summary</SheetTitle>
+          <SheetTitle>Call details</SheetTitle>
           <SheetDescription>
             {call
               ? `${call.agentName ?? "Unassigned agent"} · ${formatDateTime(call.startedAt)}`
@@ -116,28 +123,89 @@ export function CallDetailSheet({
               <div className="flex justify-between gap-4">
                 <span className="text-slate-500">Duration</span>
                 <span className="font-mono text-slate-700">
-                  {formatDuration(call.duration)}
+                  {formatDuration(durationSec)}
                 </span>
               </div>
               <div className="flex justify-between gap-4">
-                <span className="text-slate-500">Status</span>
+                <span className="text-slate-500">App status</span>
                 <Badge variant="secondary">{call.dispositionLabel}</Badge>
               </div>
               <div className="flex justify-between gap-4">
-                <span className="text-slate-500">Credits</span>
-                <span className="font-mono text-slate-700">{call.credits}</span>
-              </div>
-              <div className="flex justify-between gap-4">
-                <span className="text-slate-500">Call SID</span>
-                <span className="font-mono text-xs text-slate-600">
-                  {call.providerCallId}
+                <span className="text-slate-500">Credits / cost</span>
+                <span className="font-mono text-slate-700">
+                  {twilioDisplay?.cost ?? call.credits}
                 </span>
               </div>
             </div>
 
+            {twilio && (
+              <div className="space-y-2">
+                <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+                  Twilio call log
+                </h3>
+                <div className="grid gap-2 rounded-lg border border-indigo-100 bg-indigo-50/40 p-4 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-slate-500">Call status</span>
+                    <Badge
+                      variant={twilioStatusBadgeVariant(twilio.status)}
+                    >
+                      {twilioDisplay?.twilioStatus ?? twilio.status ?? "—"}
+                    </Badge>
+                  </div>
+                  <DetailRow
+                    label="Direction"
+                    value={twilioDisplay?.direction}
+                  />
+                  <DetailRow
+                    label="Answered by"
+                    value={twilioDisplay?.answeredBy}
+                  />
+                  <DetailRow
+                    label="Caller ID name"
+                    value={twilio.callerName}
+                  />
+                  <DetailRow
+                    label="Forwarded from"
+                    value={twilio.forwardedFrom}
+                  />
+                  <DetailRow
+                    label="Started (Twilio)"
+                    value={formatDateTime(twilio.startTime)}
+                  />
+                  <DetailRow
+                    label="Ended (Twilio)"
+                    value={formatDateTime(twilio.endTime)}
+                  />
+                  <DetailRow
+                    label="Queue wait"
+                    value={twilioDisplay?.queueTime}
+                  />
+                  <DetailRow
+                    label="Call SID"
+                    value={twilio.sid}
+                    mono
+                  />
+                  {twilio.parentCallSid ? (
+                    <DetailRow
+                      label="Parent call SID"
+                      value={twilio.parentCallSid}
+                      mono
+                    />
+                  ) : null}
+                  {twilio.phoneNumberSid ? (
+                    <DetailRow
+                      label="Phone number SID"
+                      value={twilio.phoneNumberSid}
+                      mono
+                    />
+                  ) : null}
+                </div>
+              </div>
+            )}
+
             <div className="space-y-2">
               <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-                Call summary
+                AI summary
               </h3>
               <p className="rounded-lg border border-slate-200 bg-white p-4 text-sm leading-relaxed text-slate-700">
                 {call.summary?.trim() ||
@@ -231,5 +299,30 @@ export function CallDetailSheet({
         )}
       </SheetContent>
     </Sheet>
+  );
+}
+
+function DetailRow({
+  label,
+  value,
+  mono,
+}: {
+  label: string;
+  value: string | null | undefined;
+  mono?: boolean;
+}) {
+  const display = value?.trim() ? value : "—";
+  return (
+    <div className="flex justify-between gap-4">
+      <span className="shrink-0 text-slate-500">{label}</span>
+      <span
+        className={cn(
+          "text-right font-medium text-slate-800",
+          mono && "font-mono text-xs",
+        )}
+      >
+        {display}
+      </span>
+    </div>
   );
 }

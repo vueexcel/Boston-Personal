@@ -5,7 +5,6 @@ import {
 import { inboundMediaStreamTwiML, spokenMessageTwiML } from "@/lib/voice/twiml-stream";
 import {
   getTwilioRecordingWebhookUrl,
-  getTwilioTranscriptionWebhookUrl,
 } from "@/lib/webhooks/twilio-app-url";
 import { getTwilioSignatureUrl } from "@/lib/webhooks/request-url";
 import {
@@ -21,6 +20,7 @@ import { createCallRecordTransact } from "@/lib/services/calls";
 import { loadCallAgentContext } from "@/lib/services/twilio-call-agent";
 import { createCallSession } from "@/lib/voice/call-session";
 import { getTwilioMediaStreamWssUrl } from "@/lib/env/server";
+import { getTwilioVoiceStatusWebhookUrl } from "@/lib/webhooks/twilio-app-url";
 import {
   agentDebugLog,
   isLocalOrPrivateWss,
@@ -174,14 +174,19 @@ export async function POST(request: Request): Promise<Response> {
       console.error("[bostel-voice] createCallRecordTransact", message);
     }
 
+    if (process.env.DEBUG_VOICE === "1") {
+      console.log(
+        "[bostel-voice] Ensure Twilio phone status callback is set:",
+        getTwilioVoiceStatusWebhookUrl(),
+        "(run: npx tsx --env-file=.env scripts/twilio/sync-voice-status-callbacks.ts)",
+      );
+    }
+
     const streamUrl = getTwilioMediaStreamWssUrl();
-    const transcriptionUrl = getTwilioTranscriptionWebhookUrl();
     const recordingUrl = getTwilioRecordingWebhookUrl();
     const twiml = inboundMediaStreamTwiML({
       streamUrl,
-      transcriptionCallbackUrl: transcriptionUrl,
       recordingCallbackUrl: recordingUrl,
-      languageCode: agentSnapshot.sttLanguage,
     });
     agentDebugLog({
       location: "voice/route.ts:twiml",
@@ -190,8 +195,7 @@ export async function POST(request: Request): Promise<Response> {
       data: {
         streamHost: wssHost(streamUrl),
         streamIsLocal: isLocalOrPrivateWss(streamUrl),
-        transcriptionHost: wssHost(transcriptionUrl.replace(/^http/, "https")),
-        sttLanguage: agentSnapshot.sttLanguage,
+        sttEngine: "elevenlabs-scribe-v2-realtime",
         twimlBytes: twiml.length,
         agentIdPrefix: resolution.agentId.slice(0, 8),
       },

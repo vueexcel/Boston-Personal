@@ -16,10 +16,21 @@ export type ProvisionPhoneNumberBody = z.infer<
   typeof provisionPhoneNumberBodySchema
 >;
 
+const availablePhoneNumberTypeSchema = z.enum([
+  "local",
+  "toll_free",
+  "mobile",
+]);
+
 export const availablePhoneNumbersQuerySchema = z.object({
-  country: z.string().min(2).max(2).default("US"),
+  country: z.string().length(2).default("US"),
   areaCode: z
-    .union([z.literal(""), z.string().regex(/^\d{3}$/)])
+    .union([z.literal(""), z.string().regex(/^\d{1,5}$/)])
     .optional()
     .default(""),
+  numberType: availablePhoneNumberTypeSchema.optional(),
 });
+
+export type AvailablePhoneNumberTypeQuery = z.infer<
+  typeof availablePhoneNumberTypeSchema
+>;

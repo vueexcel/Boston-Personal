@@ -5,10 +5,6 @@ import {
   saveCallSession,
   type TwilioCallSession,
 } from "@/lib/voice/call-session";
-import {
-  subscribeCallerUtterances,
-  type CallerUtteranceMessage,
-} from "@/lib/voice/call-utterance-bridge";
 import { runCallTurnStream } from "@/lib/services/twilio-call-agent";
 import {
   playMulawChunks,
@@ -17,13 +13,18 @@ import {
 import { agentDebugLog } from "@/lib/debug/agent-log";
 import {
   CallEndpointDebouncer,
+  coalescePendingTranscript,
+  lastUserMessageContent,
   shouldTriggerBargeIn,
+  type CallerUtteranceMessage,
 } from "@/lib/voice/endpointing";
-import { getVoiceTuningConfig } from "@/lib/voice/voice-tuning";
+import { finalizeInboundCall } from "@/lib/voice/finalize-call";
 import {
-  isMediaStreamSttEnabled,
-  MediaStreamSttBuffer,
-} from "@/lib/voice/media-stream-stt";
+  getGoodbyeFarewell,
+  isGoodbyeIntent,
+} from "@/lib/voice/goodbye-intent";
+import { getVoiceTuningConfig } from "@/lib/voice/voice-tuning";
+import { ElevenLabsScribeRealtimeStt } from "@/lib/voice/elevenlabs-scribe-realtime-stt";
 
 type TwilioMediaMessage = {
   event?: string;
@@ -50,14 +51,18 @@ export class TwilioMediaStreamHandler {
   private callSid: string | null = null;
   private session: TwilioCallSession | null = null;
   private processingUtterance = false;
-  private unsubscribeUtterances: (() => Promise<void>) | null = null;
   private speakGeneration = 0;
   private activeTurnId = 0;
   private turnAbort: AbortController | null = null;
   private readonly voiceTuning = getVoiceTuningConfig();
   private endpointDebouncer: CallEndpointDebouncer | null = null;
   private pendingUserTranscript: string | null = null;
-  private mediaStt: MediaStreamSttBuffer | null = null;
+  private scribeStt: ElevenLabsScribeRealtimeStt | null = null;
+  private finalizing = false;
+  private callerSpeechBuffer: string | null = null;
+  private scribeReconnectAttempts = 0;
+  private static readonly MAX_SCRIBE_RECONNECTS = 5;
+  private cleanupReason: string | null = null;
 
   constructor(ws: WebSocket) {
     this.ws = ws;
@@ -65,7 +70,7 @@ export class TwilioMediaStreamHandler {
       void this.onMessage(data.toString());
     });
     this.ws.on("close", () => {
-      void this.cleanup();
+      void this.cleanup("twilio-ws-close");
     });
   }
 
@@ -93,16 +98,16 @@ export class TwilioMediaStreamHandler {
         const track = msg.media?.track;
         const payload = msg.media?.payload;
         if (
-          this.mediaStt &&
+          this.scribeStt &&
           payload &&
           (track === "inbound" || track === "inbound_track" || !track)
         ) {
-          this.mediaStt.ingest(payload);
+          this.scribeStt.sendAudio(payload);
         }
         break;
       }
       case "stop":
-        await this.cleanup();
+        await this.cleanup("twilio-stop-event");
         break;
       default:
         break;
@@ -144,32 +149,115 @@ export class TwilioMediaStreamHandler {
     this.endpointDebouncer = new CallEndpointDebouncer(
       this.voiceTuning,
       (text) => {
-        void this.handleUserTurn(text, { fromEndpoint: true });
+        void this.onEndpointFired(text);
       },
     );
 
-    this.unsubscribeUtterances = await subscribeCallerUtterances(
-      callSid,
-      (message) => {
-        void this.onCallerSpeech(message);
-      },
-    );
+    this.attachScribeStt(session);
 
-    if (isMediaStreamSttEnabled()) {
-      this.mediaStt = new MediaStreamSttBuffer((text) => {
-        void this.onCallerSpeech({
-          text,
-          timestamp: new Date().toISOString(),
-          final: true,
-          stability: 1,
-        });
-      });
+    try {
+      await this.scribeStt!.connect();
+    } catch (e) {
+      console.error("[media-stream] ElevenLabs Scribe connect failed", e);
+      this.ws.close();
+      return;
     }
 
     await this.playGreeting(session);
+    await this.enterListening("greeting-done");
+  }
+
+  private attachScribeStt(session: TwilioCallSession): void {
+    const language =
+      session.agentSnapshot.language ?? session.agentSnapshot.sttLanguage;
+    this.scribeStt = new ElevenLabsScribeRealtimeStt({
+      language,
+      onTranscript: (msg) => {
+        void this.onCallerSpeech({
+          text: msg.text,
+          timestamp: new Date().toISOString(),
+          final: msg.final,
+          stability: msg.final ? msg.stability : undefined,
+        });
+      },
+      onUnexpectedClose: (info) => {
+        void this.reconnectScribe(info);
+      },
+    });
+  }
+
+  private async reconnectScribe(info: {
+    code: number;
+    reason: string;
+  }): Promise<void> {
+    if (this.state === "ended" || !this.scribeStt || !this.session) return;
+    if (this.scribeReconnectAttempts >= TwilioMediaStreamHandler.MAX_SCRIBE_RECONNECTS) {
+      console.error("[media-stream] Scribe reconnect limit reached", info);
+      return;
+    }
+    this.scribeReconnectAttempts += 1;
+    console.warn("[media-stream] Reconnecting Scribe STT", {
+      attempt: this.scribeReconnectAttempts,
+      ...info,
+    });
+    try {
+      await this.scribeStt.reconnect();
+    } catch (e) {
+      console.error("[media-stream] Scribe reconnect failed", e);
+    }
+  }
+
+  private async onEndpointFired(text: string): Promise<void> {
+    if (this.state !== "listening") return;
+    const delay = this.voiceTuning.postEndpointDelayMs;
+    if (delay > 0) {
+      await sleep(delay);
+    }
+    if (this.state !== "listening") return;
+    await this.handleUserTurn(text, { fromEndpoint: true });
+  }
+
+  private bufferCallerSpeech(text: string, final: boolean): void {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    if (final) {
+      this.callerSpeechBuffer = trimmed;
+      return;
+    }
+    this.callerSpeechBuffer = coalescePendingTranscript(
+      this.callerSpeechBuffer,
+      trimmed,
+    );
+  }
+
+  /** Called when agent finishes speaking and we can take caller turns. */
+  private async enterListening(reason: string): Promise<void> {
+    if (this.state === "ended") return;
+    this.state = "listening";
+    if (process.env.DEBUG_VOICE === "1") {
+      agentDebugLog({
+        location: "twilio-media-stream-handler.ts:enterListening",
+        message: reason,
+        hypothesisId: "H6",
+        data: {
+          bufferedLen: this.callerSpeechBuffer?.length ?? 0,
+          scribeReady: this.scribeStt?.isReady() ?? false,
+        },
+      });
+    }
+    await this.flushCallerSpeechBuffer();
+  }
+
+  private async flushCallerSpeechBuffer(): Promise<void> {
+    const text = this.callerSpeechBuffer?.trim();
+    this.callerSpeechBuffer = null;
+    if (!text || this.state !== "listening") return;
+    await this.onEndpointFired(text);
   }
 
   private async onCallerSpeech(message: CallerUtteranceMessage): Promise<void> {
+    if (this.state === "ended") return;
+
     const event = {
       text: message.text,
       final: message.final,
@@ -183,24 +271,38 @@ export class TwilioMediaStreamHandler {
 
     if (interruptible && shouldTriggerBargeIn(event, this.voiceTuning)) {
       this.interruptPlayback("barge-in");
-      agentDebugLog({
-        location: "twilio-media-stream-handler.ts:barge-in",
-        message: "caller interrupted agent playback",
-        hypothesisId: "H6",
-        data: {
-          state: this.state,
-          final: message.final,
-          textLen: message.text.length,
-        },
-      });
+      if (process.env.DEBUG_VOICE === "1") {
+        agentDebugLog({
+          location: "twilio-media-stream-handler.ts:barge-in",
+          message: "caller interrupted agent playback",
+          hypothesisId: "H6",
+          data: {
+            state: this.state,
+            final: message.final,
+            textLen: message.text.length,
+          },
+        });
+      }
+    }
+
+    if (this.state !== "listening") {
+      this.bufferCallerSpeech(message.text, message.final);
+      return;
     }
 
     if (message.final) {
-      this.endpointDebouncer?.ingest(event);
+      await this.onEndpointFired(message.text);
       return;
     }
 
     this.endpointDebouncer?.ingest(event);
+  }
+
+  private queuePendingTranscript(transcript: string): void {
+    this.pendingUserTranscript = coalescePendingTranscript(
+      this.pendingUserTranscript,
+      transcript,
+    );
   }
 
   private interruptPlayback(reason: string): void {
@@ -210,14 +312,16 @@ export class TwilioMediaStreamHandler {
       this.turnAbort = null;
     }
     this.sendClear();
-    agentDebugLog({
-      location: "twilio-media-stream-handler.ts:interrupt",
-      message: reason,
-      hypothesisId: "H6",
-      data: { speakGeneration: this.speakGeneration },
-    });
+    if (process.env.DEBUG_VOICE === "1") {
+      agentDebugLog({
+        location: "twilio-media-stream-handler.ts:interrupt",
+        message: reason,
+        hypothesisId: "H6",
+        data: { speakGeneration: this.speakGeneration },
+      });
+    }
     if (this.state === "speaking" || this.state === "greeting") {
-      this.state = "listening";
+      void this.enterListening("barge-in-to-listening");
     }
   }
 
@@ -236,10 +340,17 @@ export class TwilioMediaStreamHandler {
     options?: { fromEndpoint?: boolean },
   ): Promise<void> {
     if (this.state === "ended") return;
-    if (!transcript || !this.session || !this.callSid) return;
+    if (!transcript?.trim() || !this.session || !this.callSid) return;
+
+    const text = transcript.trim();
+
+    if (isGoodbyeIntent(text)) {
+      await this.handleGoodbyeTurn(text);
+      return;
+    }
 
     if (this.processingUtterance) {
-      this.pendingUserTranscript = transcript;
+      this.queuePendingTranscript(text);
       this.interruptPlayback("new-utterance-queued");
       return;
     }
@@ -250,12 +361,27 @@ export class TwilioMediaStreamHandler {
         this.state === "processing" ||
         this.state === "greeting"
       ) {
-        this.pendingUserTranscript = transcript;
+        this.queuePendingTranscript(text);
         return;
       }
     }
 
-    await this.runTurn(transcript);
+    await this.runTurn(text);
+  }
+
+  private async handleGoodbyeTurn(userText: string): Promise<void> {
+    if (!this.session || !this.callSid) return;
+
+    this.state = "ended";
+    this.processingUtterance = true;
+    this.interruptPlayback("goodbye");
+    this.endpointDebouncer?.reset();
+
+    const farewell = getGoodbyeFarewell(null);
+    const updated = await appendCallMessages(this.callSid, userText, farewell);
+    if (updated) this.session = updated;
+
+    await this.endCall(farewell, { skipStateSet: true });
   }
 
   private async runTurn(transcript: string): Promise<void> {
@@ -275,6 +401,7 @@ export class TwilioMediaStreamHandler {
       return;
     }
 
+    this.endpointDebouncer?.reset();
     this.processingUtterance = true;
     this.state = "processing";
     const turnId = ++this.activeTurnId;
@@ -284,7 +411,6 @@ export class TwilioMediaStreamHandler {
     let llmFirstTokenMs: number | null = null;
     let ttsFirstByteMs: number | null = null;
     let firstMediaSentMs: number | null = null;
-    const spokenParts: string[] = [];
     const speakGenAtStart = this.speakGeneration;
 
     try {
@@ -299,7 +425,6 @@ export class TwilioMediaStreamHandler {
           },
           onSentence: async (sentence) => {
             if (signal.aborted || turnId !== this.activeTurnId) return;
-            spokenParts.push(sentence);
             await this.speakSentence(sentence, speakGenAtStart, {
               onFirstTtsByte: () => {
                 if (ttsFirstByteMs == null) {
@@ -348,20 +473,28 @@ export class TwilioMediaStreamHandler {
     } finally {
       this.turnAbort = null;
       this.processingUtterance = false;
-      if (this.state === "processing" && !signal.aborted) {
-        this.state = "listening";
-      }
       const pending = this.pendingUserTranscript;
       this.pendingUserTranscript = null;
-      if (pending && this.state === "listening") {
-        void this.runTurn(pending);
-      }
+      await this.afterRunTurn(pending, signal.aborted);
     }
+  }
+
+  private async afterRunTurn(
+    pending: string | null,
+    aborted: boolean,
+  ): Promise<void> {
+    if (!aborted && this.state === "processing") {
+      await this.enterListening("turn-done");
+    }
+    if (!pending || this.state !== "listening") return;
+
+    const lastUser = lastUserMessageContent(this.session?.messages ?? []);
+    if (lastUser && pending.trim() === lastUser) return;
+    void this.runTurn(pending);
   }
 
   private async playGreeting(session: TwilioCallSession): Promise<void> {
     if (session.greetingPlayed) {
-      this.state = "listening";
       return;
     }
 
@@ -387,9 +520,7 @@ export class TwilioMediaStreamHandler {
       }
     }
 
-    if (this.state !== "ended" && this.state === "greeting") {
-      this.state = "listening";
-    }
+
   }
 
   private async speakSentence(
@@ -447,7 +578,7 @@ export class TwilioMediaStreamHandler {
       this.speakGeneration === expectedGeneration &&
       (this.state === "speaking" || this.state === "greeting")
     ) {
-      this.state = "listening";
+      await this.enterListening("tts-done");
     }
   }
 
@@ -462,27 +593,60 @@ export class TwilioMediaStreamHandler {
     );
   }
 
-  private async endCall(message: string): Promise<void> {
-    this.state = "ended";
+  private async endCall(
+    message: string,
+    options?: { skipStateSet?: boolean },
+  ): Promise<void> {
+    if (!options?.skipStateSet) {
+      this.state = "ended";
+    }
     this.interruptPlayback("end-call");
     const gen = this.speakGeneration;
     await this.speakSentence(message, gen);
     this.ws.close();
   }
 
-  private async cleanup(): Promise<void> {
+  private async cleanup(_reason: string): Promise<void> {
+    if (this.cleanupReason) return;
+    this.cleanupReason = _reason;
+    if (
+      this.state === "listening" &&
+      !this.processingUtterance &&
+      this.endpointDebouncer
+    ) {
+      const pending = this.endpointDebouncer.flushPending();
+      if (pending) {
+        await this.onEndpointFired(pending);
+      }
+    }
+
     this.state = "ended";
-    this.mediaStt?.reset();
-    this.mediaStt = null;
     this.endpointDebouncer?.reset();
     this.interruptPlayback("cleanup");
-    if (this.unsubscribeUtterances) {
+    if (this.scribeStt) {
       try {
-        await this.unsubscribeUtterances();
+        await this.scribeStt.close();
       } catch {
         // ignore
       }
-      this.unsubscribeUtterances = null;
+      this.scribeStt = null;
+    }
+
+    if (this.callSid && !this.finalizing) {
+      this.finalizing = true;
+      try {
+        await finalizeInboundCall({
+          providerCallId: this.callSid,
+          status: "COMPLETED",
+          deleteSession: true,
+        });
+      } catch (e) {
+        console.error("[media-stream] finalize on cleanup failed", e);
+      }
     }
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

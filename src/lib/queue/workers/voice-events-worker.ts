@@ -60,6 +60,9 @@ async function processInboundCompleted(
       metadataPatch.twilioPrice = priceInfo.price;
       metadataPatch.twilioPriceUnit = priceInfo.priceUnit;
     }
+    if (priceInfo.insights) {
+      metadataPatch.twilioInsights = priceInfo.insights;
+    }
     const durationSec = row.duration ?? priceInfo.duration;
     if (durationSec != null && durationSec > 0) {
       patch.callMinutes = durationSec / 60;

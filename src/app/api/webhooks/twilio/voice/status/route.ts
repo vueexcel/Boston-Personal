@@ -3,17 +3,8 @@ import {
   twilioFormDataToParams,
   verifyTwilioWebhookSignature,
 } from "@/lib/webhooks/verify-twilio";
-import {
-  buildTranscriptPlainText,
-  buildTranscriptTurns,
-} from "@/lib/services/call-metadata";
-import {
-  updateCallLogById,
-  updateCallLogByProviderId,
-  type CallLogPatch,
-} from "@/lib/services/calls";
-import { deleteCallSession, getCallSession } from "@/lib/voice/call-session";
-import { enqueueInboundVoiceCompleted } from "@/lib/services/voice-events";
+import { updateCallLogByProviderId } from "@/lib/services/calls";
+import { finalizeInboundCall } from "@/lib/voice/finalize-call";
 import { agentDebugLog } from "@/lib/debug/agent-log";
 
 export const runtime = "nodejs";
@@ -68,54 +59,16 @@ export async function POST(request: Request): Promise<Response> {
       : null;
 
   try {
-    const session = await getCallSession(callSid);
-    const transcriptTurns = session
-      ? buildTranscriptTurns(session.messages)
-      : [];
-    const transcript = buildTranscriptPlainText(transcriptTurns);
-
-    const applyCallLogPatch = async (patch: CallLogPatch): Promise<void> => {
-      if (session?.callLogId) {
-        await updateCallLogById(session.callLogId, patch);
-        return;
-      }
-      await updateCallLogByProviderId(callSid, patch);
-    };
-
     if (mapped === "COMPLETED" || mapped === "FAILED" || mapped === "MISSED") {
-      await applyCallLogPatch({
+      await finalizeInboundCall({
+        providerCallId: callSid,
         status: mapped,
-        endedAt: new Date().toISOString(),
-        duration,
-        disposition:
-          mapped === "COMPLETED"
-            ? "Completed"
-            : mapped === "MISSED"
-              ? "Missed"
-              : "Failed",
-        metadata: {
-          twilioStatus: callStatus,
-          turnCount: session?.turnCount ?? 0,
-          transcript,
-          transcriptTurns,
-        },
-        metadataMerge: true,
+        twilioStatus: callStatus,
+        durationSeconds: duration,
+        deleteSession: true,
       });
-
-      if (session && process.env.REDIS_URL) {
-        try {
-          await enqueueInboundVoiceCompleted({
-            tenantId: session.tenantId,
-            callId: callSid,
-          });
-        } catch {
-          // non-fatal
-        }
-      }
-
-      await deleteCallSession(callSid);
     } else if (mapped === "IN_PROGRESS") {
-      await applyCallLogPatch({
+      await updateCallLogByProviderId(callSid, {
         status: "IN_PROGRESS",
       });
     }

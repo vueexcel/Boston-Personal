@@ -24,10 +24,6 @@ export function getTwilioVoiceStatusWebhookUrl(): string {
   return `${getTwilioPublicWebhookBase()}/api/webhooks/twilio/voice/status`;
 }
 
-export function getTwilioTranscriptionWebhookUrl(): string {
-  return `${getTwilioPublicWebhookBase()}/api/webhooks/twilio/voice/transcription`;
-}
-
 export function getTwilioRecordingWebhookUrl(): string {
   return `${getTwilioPublicWebhookBase()}/api/webhooks/twilio/voice/recording`;
 }

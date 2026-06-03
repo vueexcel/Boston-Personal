@@ -2,12 +2,14 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  listAvailablePhoneNumberCountries,
   listPhoneNumbers,
   provisionPhoneNumber,
   releasePhoneNumber,
   searchAvailablePhoneNumbers,
   updatePhoneNumber,
 } from "@/lib/api/phone-numbers";
+import type { AvailablePhoneNumberType } from "@/lib/integrations/twilio-phone-numbers";
 import { queryKeys } from "@/lib/api/query-keys";
 import type {
   ProvisionPhoneNumberBody,
@@ -22,9 +24,25 @@ export function usePhoneNumbers(tenantId: string) {
   });
 }
 
+export function useAvailablePhoneNumberCountries(
+  tenantId: string,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: queryKeys.phoneNumbers.availableCountries(tenantId),
+    queryFn: () => listAvailablePhoneNumberCountries(tenantId),
+    enabled: Boolean(tenantId) && enabled,
+    staleTime: 60_000,
+  });
+}
+
 export function useAvailablePhoneNumbers(
   tenantId: string,
-  params: { country: string; areaCode: string },
+  params: {
+    country: string;
+    areaCode: string;
+    numberType?: AvailablePhoneNumberType;
+  },
   enabled: boolean,
 ) {
   return useQuery({
@@ -33,6 +51,7 @@ export function useAvailablePhoneNumbers(
       searchAvailablePhoneNumbers(tenantId, {
         country: params.country,
         areaCode: params.areaCode || undefined,
+        numberType: params.numberType,
       }),
     enabled: Boolean(tenantId) && enabled,
     staleTime: 0,

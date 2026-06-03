@@ -1,8 +1,7 @@
 import { z } from "zod";
 import { errEnvelope, jsonEnvelope, okEnvelope } from "@/lib/api/response";
 import { requireTenantApiAccess } from "@/lib/auth/tenant-access";
-import { searchAvailablePhoneNumbers } from "@/lib/integrations/twilio-phone-numbers";
-import { availablePhoneNumbersQuerySchema } from "@/lib/validation/phone-numbers";
+import { listAvailablePhoneNumberCountries } from "@/lib/integrations/twilio-phone-numbers";
 import { tenantIdSchema } from "@/lib/validation/tenant-id";
 
 const paramsSchema = z.object({
@@ -10,7 +9,7 @@ const paramsSchema = z.object({
 });
 
 export async function GET(
-  request: Request,
+  _request: Request,
   context: {
     params: Promise<{ tenantId: string }> | { tenantId: string };
   },
@@ -29,39 +28,9 @@ export async function GET(
   const authz = await requireTenantApiAccess(tenantId);
   if (!authz.ok) return authz.response;
 
-  const url = new URL(request.url);
-  const numberTypeRaw = url.searchParams.get("numberType");
-  const parsedQuery = availablePhoneNumbersQuerySchema.safeParse({
-    country: url.searchParams.get("country") ?? "US",
-    areaCode: url.searchParams.get("areaCode") ?? "",
-    numberType:
-      numberTypeRaw === "local" ||
-      numberTypeRaw === "toll_free" ||
-      numberTypeRaw === "mobile"
-        ? numberTypeRaw
-        : undefined,
-  });
-
-  if (!parsedQuery.success) {
-    return jsonEnvelope(
-      errEnvelope({
-        code: "VALIDATION_ERROR",
-        message: "Invalid query",
-        details: parsedQuery.error.flatten(),
-      }),
-      { status: 400 },
-    );
-  }
-
-  const { country, areaCode, numberType } = parsedQuery.data;
-
   try {
-    const numbers = await searchAvailablePhoneNumbers({
-      country,
-      areaCode: areaCode || undefined,
-      numberType,
-    });
-    return jsonEnvelope(okEnvelope({ numbers }));
+    const countries = await listAvailablePhoneNumberCountries();
+    return jsonEnvelope(okEnvelope({ countries }));
   } catch (e) {
     const message = e instanceof Error ? e.message : "Unexpected error";
     const status = message.includes("not configured") ? 503 : 502;

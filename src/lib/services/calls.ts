@@ -19,6 +19,13 @@ import {
 } from "@/lib/services/call-metadata";
 import { refreshTenantMetaCacheAfterWrite } from "@/lib/services/tenant";
 import type { CallSentiment } from "@/lib/services/openai-agent";
+import { fetchTwilioCallInsights } from "@/lib/integrations/twilio-call-logs";
+import type { TwilioCallInsights } from "@/lib/types/twilio-call-insights";
+import {
+  twilioDisplayFields,
+  twilioInsightsFromMetadata,
+} from "@/lib/utils/twilio-call-display";
+import type { TwilioCallDisplayFields } from "@/lib/utils/twilio-call-display";
 
 function encodeCallCursor(startedAt: string, id: string): string {
   return Buffer.from(JSON.stringify({ startedAt, id }), "utf8").toString(
@@ -98,6 +105,8 @@ export type CallLogListItem = CallLogItem & {
   agentName: string | null;
   credits: string;
   dispositionLabel: string;
+  twilio: TwilioCallInsights | null;
+  twilioDisplay: TwilioCallDisplayFields | null;
 };
 
 export type CallLogDetail = CallLogListItem & {
@@ -106,6 +115,36 @@ export type CallLogDetail = CallLogListItem & {
   actionItems: string[];
   turnCount: number;
 };
+
+async function resolveTwilioInsightsForCall(
+  providerCallId: string,
+  metadata: Record<string, unknown> | null,
+  options?: { fetchLive?: boolean },
+): Promise<TwilioCallInsights | null> {
+  const cached = twilioInsightsFromMetadata(metadata);
+  if (cached && !options?.fetchLive) return cached;
+  const live = await fetchTwilioCallInsights(providerCallId);
+  return live ?? cached;
+}
+
+function attachTwilioFields(
+  mapped: CallLogItem,
+  agentName: string | null,
+  twilio: TwilioCallInsights | null,
+): CallLogListItem {
+  const meta =
+    mapped.metadata && typeof mapped.metadata === "object"
+      ? (mapped.metadata as Record<string, unknown>)
+      : null;
+  return {
+    ...mapped,
+    agentName,
+    credits: creditsDisplay(meta, mapped.duration),
+    dispositionLabel: dispositionLabel(mapped.status, mapped.disposition),
+    twilio,
+    twilioDisplay: twilioDisplayFields(twilio),
+  };
+}
 
 export type ListCallsFilters = {
   agentId?: string | null;
@@ -172,7 +211,8 @@ export async function listCallsForTenant(
     }
   }
 
-  const calls: CallLogListItem[] = [];
+  const mappedRows: { mapped: CallLogItem; meta: Record<string, unknown> | null }[] =
+    [];
   for (const raw of rows) {
     const mapped = mapCallLogRow(raw);
     if (!mapped || mapped.tenantId !== tenantId) continue;
@@ -180,15 +220,24 @@ export async function listCallsForTenant(
       mapped.metadata && typeof mapped.metadata === "object"
         ? (mapped.metadata as Record<string, unknown>)
         : null;
-    calls.push({
-      ...mapped,
-      agentName: mapped.agentId
-        ? (agentNameById.get(mapped.agentId) ?? null)
-        : null,
-      credits: creditsDisplay(meta, mapped.duration),
-      dispositionLabel: dispositionLabel(mapped.status, mapped.disposition),
-    });
+    mappedRows.push({ mapped, meta });
   }
+
+  const twilioBySid = await Promise.all(
+    mappedRows.map(async ({ mapped, meta }) => {
+      const cached = twilioInsightsFromMetadata(meta);
+      if (cached) return cached;
+      return fetchTwilioCallInsights(mapped.providerCallId);
+    }),
+  );
+
+  const calls: CallLogListItem[] = mappedRows.map(({ mapped }, i) =>
+    attachTwilioFields(
+      mapped,
+      mapped.agentId ? (agentNameById.get(mapped.agentId) ?? null) : null,
+      twilioBySid[i] ?? null,
+    ),
+  );
 
   const hasMore = calls.length > limit;
   const page = hasMore ? calls.slice(0, limit) : calls;
@@ -265,11 +314,14 @@ export async function getCallDetailForTenant(
       ? meta.turnCount
       : transcriptTurns.length;
 
+  const twilio = await resolveTwilioInsightsForCall(
+    mapped.providerCallId,
+    meta,
+    { fetchLive: true },
+  );
+
   return {
-    ...mapped,
-    agentName: agentNameFromRow(raw),
-    credits: creditsDisplay(meta, mapped.duration),
-    dispositionLabel: dispositionLabel(mapped.status, mapped.disposition),
+    ...attachTwilioFields(mapped, agentNameFromRow(raw), twilio),
     transcriptTurns,
     sentiment: getMetadataSentiment(meta),
     actionItems: getMetadataActionItems(meta),

@@ -1,5 +1,9 @@
 import { apiDelete, apiFetch, apiGet, apiPatch, apiPost } from "@/lib/api/http";
-import type { AvailablePhoneNumber } from "@/lib/integrations/twilio-phone-numbers";
+import type {
+  AvailablePhoneNumber,
+  AvailablePhoneNumberCountry,
+  AvailablePhoneNumberType,
+} from "@/lib/integrations/twilio-phone-numbers";
 import type { PhoneNumberRow } from "@/lib/services/phone-numbers";
 import type {
   ProvisionPhoneNumberBody,
@@ -31,14 +35,30 @@ export async function updatePhoneNumber(
   return data.phoneNumber;
 }
 
+export async function listAvailablePhoneNumberCountries(
+  tenantId: string,
+): Promise<AvailablePhoneNumberCountry[]> {
+  const data = await apiGet<{ countries: AvailablePhoneNumberCountry[] }>(
+    `${path(tenantId)}/available/countries`,
+  );
+  return data.countries;
+}
+
 export async function searchAvailablePhoneNumbers(
   tenantId: string,
-  params: { country?: string; areaCode?: string },
+  params: {
+    country?: string;
+    areaCode?: string;
+    numberType?: AvailablePhoneNumberType;
+  },
 ): Promise<AvailablePhoneNumber[]> {
   const qs = new URLSearchParams();
   qs.set("country", params.country ?? "US");
   if (params.areaCode?.trim()) {
     qs.set("areaCode", params.areaCode.trim());
+  }
+  if (params.numberType) {
+    qs.set("numberType", params.numberType);
   }
   const data = await apiGet<{ numbers: AvailablePhoneNumber[] }>(
     `${path(tenantId)}/available?${qs.toString()}`,

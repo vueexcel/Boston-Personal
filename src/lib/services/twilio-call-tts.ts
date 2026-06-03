@@ -1,6 +1,9 @@
 import { getElevenLabsClient } from "@/lib/integrations/elevenlabs";
 import { getServerEnv } from "@/lib/env/server";
-import { getElevenLabsTtsModel } from "@/lib/voice/voice-tuning";
+import {
+  getElevenLabsTtsModel,
+  getVoiceTuningConfig,
+} from "@/lib/voice/voice-tuning";
 
 const CHUNK_SIZE_BYTES = 640;
 
@@ -39,11 +42,17 @@ export async function streamCallSpeechMulaw(
     throw new Error("TTS text is empty");
   }
 
+  const tuning = getVoiceTuningConfig();
+  const speed = Math.max(0.7, Math.min(1.2, tuning.ttsSpeed));
+
   const client = getElevenLabsClient();
   const body = await client.textToSpeech.convert(voiceId, {
     text: trimmed,
     modelId: getElevenLabsTtsModel(),
     outputFormat: "ulaw_8000",
+    voiceSettings: {
+      speed,
+    },
   });
 
   const stream = body as ReadableStream<Uint8Array>;
@@ -90,7 +99,8 @@ export async function playMulawChunks(
     isAborted?: () => boolean;
   },
 ): Promise<void> {
-  const delay = options?.frameDelayMs ?? 18;
+  const tuning = getVoiceTuningConfig();
+  const delay = options?.frameDelayMs ?? tuning.ttsFrameDelayMs;
   for (const payload of chunkMulawForTwilio(mulaw)) {
     if (options?.signal?.aborted || options?.isAborted?.()) return;
     sendPayload(payload);

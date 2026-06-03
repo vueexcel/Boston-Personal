@@ -11,9 +11,15 @@ export const queryKeys = {
   },
   phoneNumbers: {
     all: (tenantId: string) => ["phoneNumbers", tenantId] as const,
+    availableCountries: (tenantId: string) =>
+      ["phoneNumbers", tenantId, "availableCountries"] as const,
     available: (
       tenantId: string,
-      params: { country: string; areaCode: string },
+      params: {
+        country: string;
+        areaCode: string;
+        numberType?: string;
+      },
     ) => ["phoneNumbers", tenantId, "available", params] as const,
   },
   knowledgeBases: {

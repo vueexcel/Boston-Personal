@@ -6,6 +6,7 @@ import {
   Eye,
   Filter,
   Loader2,
+  PhoneIncoming,
   RefreshCw,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -30,6 +31,7 @@ import { CallDetailSheet } from "@/components/tenant-portal/call-detail-sheet";
 import { useAgents } from "@/hooks/use-agents";
 import { useCalls, useInvalidateCalls } from "@/hooks/use-calls";
 import type { CallLogListItem } from "@/lib/services/calls";
+import { twilioStatusBadgeVariant } from "@/lib/utils/twilio-call-display";
 import { formatPhoneNumberDisplay } from "@/lib/utils/phone-format";
 import { ApiClientError } from "@/lib/api/http";
 
@@ -85,6 +87,19 @@ function formatDateTime(iso: string): string {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+function displayDuration(row: CallLogListItem): string {
+  const sec =
+    row.duration ??
+    row.twilio?.durationSeconds ??
+    null;
+  return formatDuration(sec);
+}
+
+function displayCost(row: CallLogListItem): string {
+  if (row.twilioDisplay?.cost) return row.twilioDisplay.cost;
+  return row.credits;
 }
 
 type CallHistoryClientProps = {
@@ -161,7 +176,8 @@ export function CallHistoryClient({ tenantId }: CallHistoryClientProps) {
             </Badge>
           </div>
           <p className="mt-1 text-sm text-slate-600">
-            Inbound calls with transcript, AI summary, and Twilio recordings.
+            Tenant call logs enriched with live Twilio call data — status,
+            direction, cost, and recordings.
           </p>
         </div>
         <Button
@@ -226,78 +242,121 @@ export function CallHistoryClient({ tenantId }: CallHistoryClientProps) {
       )}
 
       <Card className="overflow-hidden border-slate-200/90 shadow-sm">
-        <Table>
-          <TableHeader>
-            <TableRow className="border-slate-200 bg-slate-50/90 hover:bg-slate-50/90">
-              <TableHead>Agent</TableHead>
-              <TableHead>Call To</TableHead>
-              <TableHead>Call From</TableHead>
-              <TableHead>Duration</TableHead>
-              <TableHead>Credits</TableHead>
-              <TableHead className="text-right">Summary</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {isPending && accumulated.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6} className="py-12 text-center">
-                  <Loader2 className="mx-auto h-6 w-6 animate-spin text-slate-400" />
-                </TableCell>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow className="border-slate-200 bg-slate-50/90 hover:bg-slate-50/90">
+                <TableHead>Agent / time</TableHead>
+                <TableHead>From → To</TableHead>
+                <TableHead>Twilio status</TableHead>
+                <TableHead>Direction</TableHead>
+                <TableHead>Duration</TableHead>
+                <TableHead>Cost</TableHead>
+                <TableHead className="text-right">Details</TableHead>
               </TableRow>
-            ) : accumulated.length === 0 ? (
-              <TableRow>
-                <TableCell
-                  colSpan={6}
-                  className="py-12 text-center text-sm text-slate-600"
-                >
-                  No calls yet. Place an inbound test call to your Twilio number.
-                </TableCell>
-              </TableRow>
-            ) : (
-              accumulated.map((row) => (
-                <TableRow key={row.callId}>
-                  <TableCell>
-                    <div className="font-medium text-indigo-700">
-                      {row.agentName ?? "—"}
-                    </div>
-                    <div className="text-xs text-slate-500">
-                      {formatDateTime(row.startedAt)}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-slate-700">
-                    {formatPhoneNumberDisplay(row.dialedNumber)}
-                  </TableCell>
-                  <TableCell className="text-slate-700">
-                    {formatPhoneNumberDisplay(row.callerNumber)}
-                  </TableCell>
-                  <TableCell className="font-mono text-slate-600">
-                    {formatDuration(row.duration)}
-                  </TableCell>
-                  <TableCell className="font-mono text-slate-600">
-                    {row.credits}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => openDetail(row.callId)}
-                    >
-                      <Eye className="mr-2 h-4 w-4" aria-hidden />
-                      View Summary
-                    </Button>
+            </TableHeader>
+            <TableBody>
+              {isPending && accumulated.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="py-12 text-center">
+                    <Loader2 className="mx-auto h-6 w-6 animate-spin text-slate-400" />
+                    <p className="mt-2 text-sm text-slate-500">
+                      Loading calls from Twilio…
+                    </p>
                   </TableCell>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
+              ) : accumulated.length === 0 ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={7}
+                    className="py-12 text-center text-sm text-slate-600"
+                  >
+                    No calls yet. Place an inbound test call to your Twilio
+                    number.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                accumulated.map((row) => {
+                  const twilioStatus =
+                    row.twilioDisplay?.twilioStatus ??
+                    row.dispositionLabel;
+                  const statusVariant = twilioStatusBadgeVariant(
+                    row.twilio?.status ?? null,
+                  );
+                  return (
+                    <TableRow key={row.callId}>
+                      <TableCell>
+                        <div className="font-medium text-indigo-700">
+                          {row.agentName ?? "—"}
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          {formatDateTime(row.startedAt)}
+                        </div>
+                        {row.twilioDisplay?.answeredBy &&
+                        row.twilioDisplay.answeredBy !== "—" ? (
+                          <div className="mt-0.5 text-xs text-slate-400">
+                            {row.twilioDisplay.answeredBy}
+                          </div>
+                        ) : null}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-start gap-1.5 text-sm text-slate-700">
+                          <PhoneIncoming
+                            className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400"
+                            aria-hidden
+                          />
+                          <div>
+                            <div>
+                              {formatPhoneNumberDisplay(row.callerNumber)}
+                            </div>
+                            <div className="text-xs text-slate-500">
+                              → {formatPhoneNumberDisplay(row.dialedNumber)}
+                            </div>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={statusVariant}>{twilioStatus}</Badge>
+                      </TableCell>
+                      <TableCell className="text-sm text-slate-600">
+                        {row.twilioDisplay?.direction ?? "—"}
+                      </TableCell>
+                      <TableCell className="font-mono text-slate-600">
+                        {displayDuration(row)}
+                        {row.twilioDisplay?.queueTime ? (
+                          <div className="text-xs font-sans text-slate-400">
+                            Queue {row.twilioDisplay.queueTime}
+                          </div>
+                        ) : null}
+                      </TableCell>
+                      <TableCell className="font-mono text-sm text-slate-600">
+                        {displayCost(row)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => openDetail(row.callId)}
+                        >
+                          <Eye className="mr-2 h-4 w-4" aria-hidden />
+                          View
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+        </div>
       </Card>
 
       <div className="flex items-center justify-between">
         <p className="text-sm text-slate-600">
           Page {pageIndex + 1}
           {nextCursor ? "" : " (last page)"}
+          {isFetching && accumulated.length > 0 ? " · updating…" : ""}
         </p>
         <div className="flex gap-2">
           <Button

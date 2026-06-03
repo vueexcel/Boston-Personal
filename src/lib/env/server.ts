@@ -21,10 +21,10 @@ const serverEnvSchema = z.object({
   OPENAI_API_KEY: z.string().min(1).optional(),
   /** Default model for call summaries and auxiliary LLM tasks. */
   OPENAI_MODEL: z.string().min(1).optional(),
-  /** Twilio Real-Time Transcription engine: google | deepgram (Twilio-managed). */
-  TWILIO_TRANSCRIPTION_ENGINE: z.enum(["google", "deepgram"]).optional(),
-  /** Speech model for Twilio RTT (e.g. telephony for google). */
-  TWILIO_TRANSCRIPTION_SPEECH_MODEL: z.string().min(1).optional(),
+  /** ElevenLabs Scribe v2 Realtime model for PSTN STT. */
+  ELEVENLABS_STT_MODEL: z.string().min(1).optional(),
+  /** Audio format for Scribe (default ulaw_8000 for Twilio Media Streams). */
+  ELEVENLABS_STT_AUDIO_FORMAT: z.string().min(1).optional(),
   PORTAL_TENANT_DISPLAY_ID: z.string().min(1).optional(),
   PORTAL_ACCOUNT_STATUS: z.enum(["ACTIVE", "INACTIVE"]).optional(),
 });
@@ -71,15 +71,4 @@ export function getVoiceMediaStreamPath(): string {
   const env = getServerEnv();
   const path = env.TWILIO_MEDIA_STREAM_PATH?.trim() || "/twilio/media-stream";
   return path.startsWith("/") ? path : `/${path}`;
-}
-
-export function getTwilioTranscriptionConfig(): {
-  engine: "google" | "deepgram";
-  speechModel: string;
-} {
-  const env = getServerEnv();
-  return {
-    engine: env.TWILIO_TRANSCRIPTION_ENGINE ?? "google",
-    speechModel: env.TWILIO_TRANSCRIPTION_SPEECH_MODEL?.trim() || "telephony",
-  };
 }

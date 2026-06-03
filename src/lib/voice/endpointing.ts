@@ -6,8 +6,13 @@ export type CallerSpeechEvent = {
   stability?: number;
 };
 
+/** Inbound caller speech from STT (partial or committed). */
+export type CallerUtteranceMessage = CallerSpeechEvent & {
+  timestamp: string;
+};
+
 /**
- * Client-side endpointing on Twilio partial transcripts (silence debounce).
+ * Client-side endpointing on partial/committed STT transcripts (silence debounce).
  */
 export class CallEndpointDebouncer {
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -39,8 +44,11 @@ export class CallEndpointDebouncer {
       return;
     }
 
-    const stability = event.stability ?? 0;
-    if (stability < this.config.partialStabilityMin) {
+    // Scribe realtime partials omit stability; only reject when stability is explicit and low.
+    if (
+      event.stability != null &&
+      event.stability < this.config.partialStabilityMin
+    ) {
       return;
     }
 
@@ -68,6 +76,20 @@ export class CallEndpointDebouncer {
     this.lastFinalText = "";
   }
 
+  /** Returns best-effort pending partial text (e.g. on stream stop). */
+  flushPending(): string | null {
+    this.clearTimer();
+    const text = this.lastStableText.trim();
+    if (
+      text.length >= this.config.endpointMinChars &&
+      text !== this.lastFinalText
+    ) {
+      this.lastFinalText = text;
+      return text;
+    }
+    return null;
+  }
+
   private clearTimer(): void {
     if (this.timer) {
       clearTimeout(this.timer);
@@ -82,7 +104,37 @@ export function shouldTriggerBargeIn(
 ): boolean {
   const text = event.text.trim();
   if (text.length < config.bargeInMinChars) return false;
+
+  if (config.bargeInOnlyFinal) {
+    return event.final;
+  }
+
   if (event.final) return true;
-  const stability = event.stability ?? 0;
-  return stability >= config.partialStabilityMin;
+  return false;
+}
+
+/** Prefer longer / newer utterance when queueing during overlap. */
+export function coalescePendingTranscript(
+  existing: string | null,
+  incoming: string,
+): string {
+  const next = incoming.trim();
+  if (!existing?.trim()) return next;
+  const prev = existing.trim();
+  if (next === prev) return prev;
+  if (next.includes(prev)) return next;
+  if (prev.includes(next)) return prev;
+  return next;
+}
+
+export function lastUserMessageContent(
+  messages: { role: string; content: string }[],
+): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role === "user" && m.content.trim()) {
+      return m.content.trim();
+    }
+  }
+  return null;
 }
