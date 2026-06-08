@@ -1,4 +1,5 @@
 import { getRedis } from "@/lib/cache/redis";
+import type { CollectedInfoMap } from "@/lib/services/call-collected-info";
 import type { CallAgentSnapshot, CallChatMessage } from "@/lib/services/twilio-call-agent";
 
 export type TwilioCallSession = {
@@ -13,6 +14,7 @@ export type TwilioCallSession = {
   startedAt: string;
   agentSnapshot: CallAgentSnapshot;
   greetingPlayed: boolean;
+  collectedInfo?: CollectedInfoMap;
 };
 
 function sessionKey(callSid: string): string {

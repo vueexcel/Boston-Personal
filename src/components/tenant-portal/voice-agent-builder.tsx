@@ -25,7 +25,6 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -67,10 +66,22 @@ import {
   usePreviewVoice,
 } from "@/hooks/use-elevenlabs-voices";
 import { AgentTestPanel } from "@/components/tenant-portal/agent-test-panel";
+import {
+  ContentSafetyBanner,
+  ContentSafetyHints,
+  formatSafetyIssues,
+} from "@/components/tenant-portal/content-safety-hints";
 import { ApiClientError } from "@/lib/api/http";
+import { useAgentPromptPreview } from "@/hooks/use-agent-prompt-preview";
+import type { SafetyIssue } from "@/lib/prompt-content-safety-patterns";
 import { formatPhoneNumberDisplay } from "@/lib/utils/phone-format";
 import type { PortalElevenLabsVoice } from "@/lib/services/elevenlabs-voices";
 import type { AgentTestDraft } from "@/lib/validation/agent-test";
+import {
+  ELEVEN_FLASH_V25_LANGUAGES,
+  normalizeAgentLanguageForPortal,
+  type ElevenFlashV25LanguageCode,
+} from "@/lib/integrations/elevenlabs-flash-v25-languages";
 import { cn } from "@/lib/utils";
 
 const AGENT_STATUSES = agentStatusSchema.options;
@@ -142,6 +153,7 @@ type AgentFormSnapshot = {
   status: AgentStatus;
   greeting: string;
   voiceId: string;
+  language: ElevenFlashV25LanguageCode;
   portalConfig: AgentPortalConfigV1;
 };
 
@@ -151,6 +163,7 @@ function buildFormSnapshot(form: AgentFormSnapshot): string {
     status: form.status,
     greeting: form.greeting.trim(),
     voiceId: form.voiceId.trim(),
+    language: form.language,
     roleDescription: serializeAgentPortalConfig(form.portalConfig),
   });
 }
@@ -295,7 +308,7 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
     status: agent.status,
     greeting: agent.greeting ?? "",
     voiceId: agent.voiceId ?? "",
-    language: agent.language ?? "en-US",
+    language: normalizeAgentLanguageForPortal(agent.language),
     portalConfig: initialPortalConfig,
   });
 
@@ -305,7 +318,9 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
   );
   const [greeting, setGreeting] = React.useState(initialRef.current.greeting);
   const [voiceId, setVoiceId] = React.useState(initialRef.current.voiceId);
-  const [language] = React.useState(initialRef.current.language);
+  const [language, setLanguage] = React.useState<ElevenFlashV25LanguageCode>(
+    initialRef.current.language,
+  );
   const [portalConfig, setPortalConfig] = React.useState<AgentPortalConfigV1>(
     clonePortalConfig(initialPortalConfig),
   );
@@ -316,6 +331,8 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
   const saving = updateAgentMutation.isPending;
   const [saveMessage, setSaveMessage] = React.useState<string | null>(null);
   const [saveError, setSaveError] = React.useState<string | null>(null);
+  const [saveWarnings, setSaveWarnings] = React.useState<SafetyIssue[]>([]);
+  const [activeTab, setActiveTab] = React.useState("behavior");
 
   const previewLoading = previewVoiceMutation.isPending;
   const [previewError, setPreviewError] = React.useState<string | null>(null);
@@ -353,13 +370,14 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
       status: agent.status,
       greeting: agent.greeting ?? "",
       voiceId: agent.voiceId ?? "",
-      language: agent.language ?? "en-US",
+      language: normalizeAgentLanguageForPortal(agent.language),
       portalConfig: nextPortalConfig,
     };
     setAgentName(initialRef.current.name);
     setStatus(agentStatusSchema.parse(initialRef.current.status));
     setGreeting(initialRef.current.greeting);
     setVoiceId(initialRef.current.voiceId);
+    setLanguage(initialRef.current.language);
     setPortalConfig(clonePortalConfig(nextPortalConfig));
     setSaveMessage(null);
     setSaveError(null);
@@ -408,7 +426,10 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
       previewObjectUrlRef.current = null;
     }
     try {
-      const blob = await previewVoiceMutation.mutateAsync(id);
+      const blob = await previewVoiceMutation.mutateAsync({
+        voiceId: id,
+        language,
+      });
       const url = URL.createObjectURL(blob);
       previewObjectUrlRef.current = url;
       const audio = new Audio(url);
@@ -437,7 +458,7 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
           : "Network error while loading preview",
       );
     }
-  }, [selectedVoiceId, previewVoiceMutation]);
+  }, [selectedVoiceId, language, previewVoiceMutation]);
 
   React.useEffect(() => {
     if (!newVoiceFile) {
@@ -669,6 +690,7 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
       status: agentStatusSchema.parse(i.status),
       greeting: i.greeting,
       voiceId: voiceIdInAccountOrEmpty(i.voiceId, elevenVoices),
+      language: i.language,
       portalConfig: i.portalConfig,
     });
     const current = buildFormSnapshot({
@@ -676,10 +698,20 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
       status,
       greeting,
       voiceId: voiceIdInAccountOrEmpty(voiceId, elevenVoices),
+      language,
       portalConfig,
     });
     return current !== saved;
-  }, [agentName, status, greeting, voiceId, portalConfig, saveBaselineKey, elevenVoices]);
+  }, [
+    agentName,
+    status,
+    greeting,
+    voiceId,
+    language,
+    portalConfig,
+    saveBaselineKey,
+    elevenVoices,
+  ]);
 
   React.useEffect(() => {
     if (!isDirty) return;
@@ -696,6 +728,7 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
     setStatus(agentStatusSchema.parse(i.status));
     setGreeting(i.greeting);
     setVoiceId(i.voiceId);
+    setLanguage(i.language);
     setPortalConfig(clonePortalConfig(i.portalConfig));
     setLlmTemperature(0.35);
     setSaveMessage(null);
@@ -710,23 +743,27 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
       greeting: string | null;
       roleDescription: string | null;
       voiceId?: string | null;
+      language?: string | null;
     }) => {
       const parsedStatus = agentStatusSchema.parse(a.status);
       const nextPortalConfig = clonePortalConfig(
         parseAgentPortalConfig(a.roleDescription).config,
       );
+      const nextLanguage = normalizeAgentLanguageForPortal(a.language);
       initialRef.current = {
         ...initialRef.current,
         name: a.name,
         status: parsedStatus,
         greeting: a.greeting ?? "",
         voiceId: a.voiceId ?? "",
+        language: nextLanguage,
         portalConfig: nextPortalConfig,
       };
       setAgentName(a.name);
       setStatus(parsedStatus);
       setGreeting(a.greeting ?? "");
       setVoiceId(a.voiceId ?? "");
+      setLanguage(nextLanguage);
       setPortalConfig(clonePortalConfig(nextPortalConfig));
       setSaveBaselineKey((k) => k + 1);
     },
@@ -743,7 +780,7 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
     setCreateVoiceError(null);
     try {
       const roleDescription = serializeAgentPortalConfig(portalConfig);
-      const { created, agent: updatedAgent } =
+      const voiceApplyResult =
         await createCustomVoiceAndApplyMutation.mutateAsync({
           name: trimmedName,
           sample: newVoiceFile,
@@ -753,15 +790,20 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
             status,
             greeting: greeting.trim() || null,
             roleDescription,
-            language: language || "en-US",
+            language,
           },
         });
+      const { created, agent: updatedAgentRow, warnings: voiceWarnings } =
+        voiceApplyResult;
       setVoiceId(created.voiceId);
       setSaveError(null);
       applyAgentToLocalState({
-        ...updatedAgent,
+        ...updatedAgentRow,
         voiceId: created.voiceId,
       });
+      if (voiceWarnings?.length) {
+        setSaveWarnings(voiceWarnings);
+      }
       setSaveMessage(
         created.requiresVerification
           ? "Custom voice created and applied. ElevenLabs may require identity verification in their app before this voice can be used on calls."
@@ -781,9 +823,10 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
   const save = async () => {
     setSaveMessage(null);
     setSaveError(null);
+    setSaveWarnings([]);
     const roleDescription = serializeAgentPortalConfig(portalConfig);
     try {
-      const updated = await updateAgentMutation.mutateAsync({
+      const { agent: updated, warnings } = await updateAgentMutation.mutateAsync({
         agentId: agent.id,
         body: {
           name: agentName.trim(),
@@ -792,69 +835,79 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
           roleDescription,
           voiceId: selectedVoiceId || null,
           voiceProviderId: selectedVoiceId ? "elevenlabs" : null,
-          language: language || "en-US",
+          language,
         },
       });
       setSaveMessage("Saved.");
+      if (warnings?.length) {
+        setSaveWarnings(warnings);
+      }
       applyAgentToLocalState(updated);
       router.refresh();
     } catch (e) {
-      setSaveError(e instanceof ApiClientError ? e.message : "Network error");
+      if (e instanceof ApiClientError && e.code === "CONTENT_SAFETY_VIOLATION") {
+        const issues =
+          (e.details as { issues?: SafetyIssue[] } | undefined)?.issues ?? [];
+        setSaveError(
+          issues.length > 0
+            ? formatSafetyIssues(issues)
+            : e.message,
+        );
+        if (issues.some((i) => i.field?.includes("knowledge"))) {
+          setActiveTab("knowledge");
+        } else {
+          setActiveTab("behavior");
+        }
+      } else {
+        setSaveError(e instanceof ApiClientError ? e.message : "Network error");
+      }
     }
   };
 
-  const testDraft = React.useMemo((): AgentTestDraft | null => {
-    if (!isDirty) return null;
-    return {
+  const currentDraft = React.useMemo(
+    (): AgentTestDraft => ({
       name: agentName.trim(),
       greeting: greeting.trim() || null,
       status,
       voiceId: selectedVoiceId || null,
       voiceProviderId: selectedVoiceId ? "elevenlabs" : null,
-      language: language || "en-US",
+      language,
       portalConfig,
-    };
-  }, [
-    isDirty,
-    agentName,
-    greeting,
-    status,
-    selectedVoiceId,
-    language,
-    portalConfig,
-  ]);
+    }),
+    [
+      agentName,
+      greeting,
+      status,
+      selectedVoiceId,
+      language,
+      portalConfig,
+    ],
+  );
 
-  const systemPromptPreview = React.useMemo(() => {
-    const resp = AGENT_RESPONSIBILITY_LABELS[portalConfig.agentResponsibility];
-    const collect =
-      portalConfig.infoToCollect.length > 0
-        ? portalConfig.infoToCollect.map((x) => `- ${x}`).join("\n")
-        : "- (none specified)";
-    const parts = [
-      "### BEHAVIOUR",
-      "",
-      "**Agent responsibility:**",
-      resp,
-      "",
-      "**Greeting / first message:**",
-      greeting.trim() || "(not set)",
-      "",
-      "**Information to collect:**",
-      collect,
-      "",
-      "**Qualifying questions:**",
-      portalConfig.qualifyingQuestions.trim() || "(not set)",
-      "",
-      "### KNOWLEDGE (draft)",
-      "",
-      "**Products & services:**",
-      (portalConfig.knowledgeProducts ?? "").trim() || "(empty)",
-      "",
-      "**Business facts & FAQs:**",
-      (portalConfig.knowledgeFaqs ?? "").trim() || "(empty)",
-    ];
-    return parts.join("\n");
-  }, [portalConfig, greeting]);
+  const testDraft = React.useMemo((): AgentTestDraft | null => {
+    if (!isDirty) return null;
+    return currentDraft;
+  }, [isDirty, currentDraft]);
+
+  const [debouncedPreviewDraft, setDebouncedPreviewDraft] =
+    React.useState(currentDraft);
+  React.useEffect(() => {
+    const timer = window.setTimeout(
+      () => setDebouncedPreviewDraft(currentDraft),
+      500,
+    );
+    return () => window.clearTimeout(timer);
+  }, [currentDraft]);
+
+  const promptPreviewQuery = useAgentPromptPreview(
+    tenantId,
+    agent.id,
+    debouncedPreviewDraft,
+    activeTab === "system",
+  );
+
+  const systemPromptPreview = promptPreviewQuery.data?.prompt ?? "";
+  const promptPreviewWarnings = promptPreviewQuery.data?.warnings ?? [];
 
   return (
     <div className={cn("space-y-4", isDirty && "pb-24")}>
@@ -891,7 +944,18 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-0">
-          <Tabs defaultValue="behavior" className="w-full">
+          {saveWarnings.length > 0 ? (
+            <ContentSafetyBanner
+              issues={saveWarnings}
+              title="Saved with content safety warnings"
+              onDismiss={() => setSaveWarnings([])}
+            />
+          ) : null}
+          <Tabs
+            value={activeTab}
+            onValueChange={setActiveTab}
+            className="w-full"
+          >
             <TabsList className={TAB_LIST_CLASS}>
               <TabsTrigger value="behavior" className={TAB_TRIGGER_CLASS}>
                 Behavior
@@ -965,6 +1029,7 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
                     value={greeting}
                     onChange={(e) => setGreeting(e.target.value)}
                   />
+                  <ContentSafetyHints text={greeting} field="greeting" />
                 </>,
               )}
 
@@ -1086,6 +1151,10 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
                       }))
                     }
                   />
+                  <ContentSafetyHints
+                    text={portalConfig.qualifyingQuestions}
+                    field="qualifyingQuestions"
+                  />
                 </>,
               )}
             </TabsContent>
@@ -1105,6 +1174,10 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
                         knowledgeProducts: e.target.value,
                       }))
                     }
+                  />
+                  <ContentSafetyHints
+                    text={portalConfig.knowledgeProducts ?? ""}
+                    field="knowledgeProducts"
                   />
                 </>,
               )}
@@ -1161,6 +1234,10 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
                     <Plus className="mr-1 h-4 w-4" />
                     Add Fact
                   </Button>
+                  <ContentSafetyHints
+                    text={portalConfig.knowledgeFaqs ?? ""}
+                    field="knowledgeFaqs"
+                  />
                 </>,
               )}
 
@@ -1463,21 +1540,25 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
 
               {sectionCard(
                 "Language / Accent",
-                "Regional language and accent preferences.",
+                "Speech language for live calls (ElevenLabs Flash v2.5 TTS), Scribe STT, and voice test when prepared. The LLM is instructed to respond in this language. The greeting above is stored as written; it is translated automatically when a call or test starts if a non-English language is selected.",
                 <>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Select disabled value="en">
-                      <SelectTrigger className="max-w-xl border-slate-200 bg-slate-50">
-                        <SelectValue placeholder="English" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="en">English</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Badge variant="secondary" className="font-normal">
-                      Coming Soon
-                    </Badge>
-                  </div>
+                  <Select
+                    value={language}
+                    onValueChange={(code) =>
+                      setLanguage(code as ElevenFlashV25LanguageCode)
+                    }
+                  >
+                    <SelectTrigger className="max-w-xl border-slate-200 bg-white">
+                      <SelectValue placeholder="Select language" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ELEVEN_FLASH_V25_LANGUAGES.map((lang) => (
+                        <SelectItem key={lang.code} value={lang.code}>
+                          {lang.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </>,
               )}
             </TabsContent>
@@ -1558,18 +1639,38 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
             </TabsContent>
 
             <TabsContent value="system" className="mt-6 space-y-4">
+              {promptPreviewWarnings.length > 0 ? (
+                <ContentSafetyBanner
+                  issues={promptPreviewWarnings}
+                  title="Draft content safety warnings"
+                />
+              ) : null}
               {sectionCard(
                 "Raw System Prompt",
-                "Auto-generated preview from your Behavior & Knowledge settings. Unlock for manual control is not available yet.",
+                "Server-generated preview including platform rules, attached knowledge base documents, and guardrails. Unlock for manual control is not available yet. ElevenLabs browser tests run on ElevenLabs servers — caller speech is screened by the hardened prompt, not by our runtime filter.",
                 <>
+                  {promptPreviewQuery.isPending && !systemPromptPreview ? (
+                    <p className="text-sm text-slate-500">Loading prompt preview…</p>
+                  ) : null}
+                  {promptPreviewQuery.isError ? (
+                    <p className="text-sm text-red-600" role="alert">
+                      Could not load prompt preview. Try again shortly.
+                    </p>
+                  ) : null}
                   <Textarea
                     readOnly
                     className="min-h-[280px] resize-y border-slate-200 bg-slate-50 font-mono text-xs leading-relaxed text-slate-800"
                     value={systemPromptPreview}
+                    placeholder={
+                      promptPreviewQuery.isPending
+                        ? "Building preview…"
+                        : "No preview available."
+                    }
                   />
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="text-xs text-slate-500">
                       {systemPromptPreview.length} characters
+                      {promptPreviewQuery.isFetching ? " · refreshing…" : ""}
                     </p>
                     <Button type="button" variant="outline" size="sm" disabled>
                       <Lock className="mr-1 h-3.5 w-3.5" />

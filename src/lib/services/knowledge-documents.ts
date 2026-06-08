@@ -4,6 +4,10 @@ import type {
   UpdateKnowledgeDocumentBody,
 } from "@/lib/validation/knowledge-bases";
 import { getKnowledgeBase } from "@/lib/services/knowledge-bases";
+import {
+  assertContentSafeForKnowledgeDocument,
+  type SafetyIssue,
+} from "@/lib/services/prompt-content-safety";
 
 export type { KnowledgeDocument } from "@/lib/services/knowledge-documents.shared";
 export { documentContentSnippet } from "@/lib/services/knowledge-documents.shared";
@@ -105,12 +109,20 @@ export async function getKnowledgeDocument(
   return mapDocRow(data as Record<string, unknown>);
 }
 
+export type KnowledgeDocumentMutationResult = {
+  document: KnowledgeDocument;
+  warnings: SafetyIssue[];
+};
+
 export async function createKnowledgeDocumentForBase(
   tenantId: string,
   kbId: string,
   body: CreateKnowledgeDocumentBody,
-): Promise<KnowledgeDocument> {
+): Promise<KnowledgeDocumentMutationResult> {
   await assertKnowledgeBaseExists(tenantId, kbId);
+
+  const safety = await assertContentSafeForKnowledgeDocument(body.content);
+  const warnings = safety.issues.filter((i) => i.severity === "warning");
 
   const supabase = createServerSupabase();
   const { data, error } = await supabase
@@ -134,7 +146,7 @@ export async function createKnowledgeDocumentForBase(
 
   const mapped = mapDocRow(data as Record<string, unknown>);
   if (!mapped) throw new Error("Invalid document row returned");
-  return mapped;
+  return { document: mapped, warnings };
 }
 
 export async function updateKnowledgeDocument(
@@ -142,7 +154,10 @@ export async function updateKnowledgeDocument(
   kbId: string,
   docId: string,
   body: UpdateKnowledgeDocumentBody,
-): Promise<KnowledgeDocument> {
+): Promise<KnowledgeDocumentMutationResult> {
+  const safety = await assertContentSafeForKnowledgeDocument(body.content);
+  const warnings = safety.issues.filter((i) => i.severity === "warning");
+
   const supabase = createServerSupabase();
   const { data, error } = await supabase
     .from("knowledge_documents")
@@ -165,7 +180,7 @@ export async function updateKnowledgeDocument(
 
   const mapped = mapDocRow(data as Record<string, unknown>);
   if (!mapped) throw new Error("Invalid document row returned");
-  return mapped;
+  return { document: mapped, warnings };
 }
 
 export async function softDeleteKnowledgeDocument(

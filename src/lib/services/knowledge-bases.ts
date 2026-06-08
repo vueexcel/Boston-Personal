@@ -1,4 +1,5 @@
 import { createServerSupabase } from "@/lib/db/supabase-server";
+import { assertContentSafeForKnowledgeDocument } from "@/lib/services/prompt-content-safety";
 import type {
   CreateKnowledgeBaseBody,
   UpdateKnowledgeBaseBody,
@@ -154,6 +155,7 @@ export async function createKnowledgeBase(
 
   const kbId = String(data.id);
   if (body.initialContent?.trim()) {
+    await assertContentSafeForKnowledgeDocument(body.initialContent);
     const { error: docError } = await supabase.from("knowledge_documents").insert({
       tenant_id: tenantId,
       knowledge_base_id: kbId,

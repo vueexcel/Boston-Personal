@@ -2,6 +2,7 @@ import { z } from "zod";
 import { errEnvelope, jsonEnvelope } from "@/lib/api/response";
 import { requireTenantApiAccess } from "@/lib/auth/tenant-access";
 import { synthesizePortalVoicePreview } from "@/lib/services/elevenlabs-preview";
+import { agentLanguageSchema } from "@/lib/validation/agent-language";
 import { tenantIdSchema } from "@/lib/validation/tenant-id";
 
 const paramsSchema = z.object({
@@ -14,6 +15,7 @@ const bodySchema = z.object({
     .min(1)
     .max(256)
     .regex(/^[a-zA-Z0-9_-]+$/, "Invalid voice id"),
+  language: agentLanguageSchema,
 });
 
 /**
@@ -68,7 +70,10 @@ export async function POST(
     );
   }
 
-  const result = await synthesizePortalVoicePreview(parsedBody.data.voiceId);
+  const result = await synthesizePortalVoicePreview(
+    parsedBody.data.voiceId,
+    parsedBody.data.language,
+  );
   if (!result.ok) {
     return jsonEnvelope(
       errEnvelope({

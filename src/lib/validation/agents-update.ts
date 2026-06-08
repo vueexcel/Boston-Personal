@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { agentStatusSchema } from "@/lib/db/schema";
+import { agentLanguageSchema } from "@/lib/validation/agent-language";
 
 /**
  * Partial update for `public.agents` (tenant-scoped).
@@ -14,7 +15,7 @@ export const updateAgentBodySchema = z
     roleDescription: z.string().max(LONG_TEXT).nullable().optional(),
     voiceId: z.string().max(512).nullable().optional(),
     voiceProviderId: z.string().max(128).nullable().optional(),
-    language: z.string().min(2).max(64).nullable().optional(),
+    language: agentLanguageSchema,
     status: agentStatusSchema.optional(),
   })
   .strict()

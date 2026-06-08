@@ -72,3 +72,43 @@ export function getVoiceMediaStreamPath(): string {
   const path = env.TWILIO_MEDIA_STREAM_PATH?.trim() || "/twilio/media-stream";
   return path.startsWith("/") ? path : `/${path}`;
 }
+
+export function getVoiceTestStreamPath(): string {
+  const path =
+    process.env.VOICE_TEST_STREAM_PATH?.trim() || "/voice/agent-test";
+  return path.startsWith("/") ? path : `/${path}`;
+}
+
+export function getVoiceTestStreamWssUrl(): string {
+  if (process.env.VOICE_MEDIA_STREAM_PROXY_VIA_APP === "1") {
+    const base = process.env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/$/, "");
+    if (!base) {
+      throw new Error(
+        "NEXT_PUBLIC_APP_URL is required when VOICE_MEDIA_STREAM_PROXY_VIA_APP=1",
+      );
+    }
+    const wssBase = base
+      .replace(/^https:\/\//i, "wss://")
+      .replace(/^http:\/\//i, "wss://");
+    return `${wssBase}${getVoiceTestStreamPath()}`;
+  }
+
+  const explicit = process.env.VOICE_TEST_STREAM_WSS_URL?.trim();
+  if (explicit) {
+    return explicit.replace(/\/$/, "");
+  }
+
+  const twilioUrl = getServerEnv().TWILIO_MEDIA_STREAM_WSS_URL?.trim();
+  if (twilioUrl) {
+    try {
+      const parsed = new URL(twilioUrl);
+      parsed.pathname = getVoiceTestStreamPath();
+      return parsed.toString().replace(/\/$/, "");
+    } catch {
+      // fall through
+    }
+  }
+
+  const port = getVoiceMediaStreamPort();
+  return `ws://localhost:${port}${getVoiceTestStreamPath()}`;
+}

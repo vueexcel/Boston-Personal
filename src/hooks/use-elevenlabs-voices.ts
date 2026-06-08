@@ -25,8 +25,8 @@ export function useElevenLabsVoices(tenantId: string) {
 
 export function usePreviewVoice(tenantId: string) {
   return useMutation({
-    mutationFn: (voiceId: string) =>
-      previewElevenLabsVoice(tenantId, voiceId),
+    mutationFn: (params: { voiceId: string; language?: string | null }) =>
+      previewElevenLabsVoice(tenantId, params.voiceId, params.language),
   });
 }
 
@@ -59,12 +59,12 @@ export function useCreateCustomVoiceAndApplyAgent(tenantId: string) {
         name: params.name,
         sample: params.sample,
       });
-      const agent = await updateAgent(tenantId, params.agentId, {
+      const { agent, warnings } = await updateAgent(tenantId, params.agentId, {
         ...params.agentPatch,
         voiceId: created.voiceId,
         voiceProviderId: "elevenlabs",
       });
-      return { created, agent };
+      return { created, agent, warnings };
     },
     onSuccess: (_data, { agentId }) => {
       void queryClient.invalidateQueries({

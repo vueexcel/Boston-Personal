@@ -1,3 +1,4 @@
+import type { CollectedInfoItem } from "@/lib/services/call-collected-info";
 import type { CallChatMessage } from "@/lib/services/twilio-call-agent";
 import type { CallSentiment } from "@/lib/services/openai-agent";
 
@@ -70,6 +71,43 @@ export function getMetadataActionItems(
   const v = metadata?.actionItems;
   if (!Array.isArray(v)) return [];
   return v.filter((x): x is string => typeof x === "string");
+}
+
+export function parseCollectedInfo(
+  metadata: Record<string, unknown> | null | undefined,
+): CollectedInfoItem[] {
+  if (!metadata) return [];
+  const raw = metadata.collectedInfo;
+  if (!Array.isArray(raw)) return [];
+  const items: CollectedInfoItem[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const o = entry as Record<string, unknown>;
+    const field = typeof o.field === "string" ? o.field : null;
+    const value =
+      o.value === null
+        ? null
+        : typeof o.value === "string"
+          ? o.value
+          : null;
+    const status = o.status;
+    if (
+      !field ||
+      (status !== "collected" &&
+        status !== "missing" &&
+        status !== "corrected")
+    ) {
+      continue;
+    }
+    items.push({ field, value, status });
+  }
+  return items;
+}
+
+export function getMetadataCollectedInfo(
+  metadata: Record<string, unknown> | null | undefined,
+): CollectedInfoItem[] {
+  return parseCollectedInfo(metadata);
 }
 
 export function dispositionLabel(

@@ -7,6 +7,7 @@ import {
   softDeleteKnowledgeDocument,
   updateKnowledgeDocument,
 } from "@/lib/services/knowledge-documents";
+import { ContentSafetyViolationError } from "@/lib/services/prompt-content-safety";
 import { updateKnowledgeDocumentBodySchema } from "@/lib/validation/knowledge-bases";
 import { tenantIdSchema } from "@/lib/validation/tenant-id";
 
@@ -109,14 +110,29 @@ export async function PATCH(
   }
 
   try {
-    const document = await updateKnowledgeDocument(
+    const { document, warnings } = await updateKnowledgeDocument(
       tenantId,
       kbId,
       docId,
       parsed.data,
     );
-    return jsonEnvelope(okEnvelope({ document }));
+    return jsonEnvelope(
+      okEnvelope({
+        document,
+        warnings: warnings.length > 0 ? warnings : undefined,
+      }),
+    );
   } catch (e) {
+    if (e instanceof ContentSafetyViolationError) {
+      return jsonEnvelope(
+        errEnvelope({
+          code: e.code,
+          message: e.message,
+          details: { issues: e.issues },
+        }),
+        { status: 400 },
+      );
+    }
     const message = e instanceof Error ? e.message : "Unexpected error";
     const status = message.includes("not found") ? 404 : 503;
     return jsonEnvelope(

@@ -1,5 +1,6 @@
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api/http";
 import type { AgentDetail, AgentSummary } from "@/lib/services/agents";
+import type { SafetyIssue } from "@/lib/prompt-content-safety-patterns";
 import type { CreateAgentBody } from "@/lib/validation/agents-create";
 import type { UpdateAgentBody } from "@/lib/validation/agents-update";
 
@@ -41,16 +42,20 @@ export async function createAgent(
   return data.agent;
 }
 
+export type UpdateAgentResponse = {
+  agent: AgentDetail;
+  warnings?: SafetyIssue[];
+};
+
 export async function updateAgent(
   tenantId: string,
   agentId: string,
   body: UpdateAgentBody,
-): Promise<AgentDetail> {
-  const data = await apiPatch<{ agent: AgentDetail }>(
+): Promise<UpdateAgentResponse> {
+  return apiPatch<UpdateAgentResponse>(
     `${tenantAgentsPath(tenantId)}/${agentId}`,
     body,
   );
-  return data.agent;
 }
 
 export async function deleteAgent(

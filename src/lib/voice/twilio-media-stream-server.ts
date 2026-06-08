@@ -1,52 +1,90 @@
 import type http from "http";
 import httpLib from "http";
+import { URL } from "url";
 import { WebSocketServer } from "ws";
 import {
   getVoiceMediaStreamPath,
   getVoiceMediaStreamPort,
+  getVoiceTestStreamPath,
 } from "@/lib/env/server";
+import { AgentTestMediaStreamHandler } from "@/lib/voice/agent-test-media-stream-handler";
+import { validateTestCallSessionToken } from "@/lib/voice/test-call-session";
 import { TwilioMediaStreamHandler } from "@/lib/voice/twilio-media-stream-handler";
 import { agentDebugLog } from "@/lib/debug/agent-log";
 
 /**
- * Attaches Twilio Media Streams WebSocket upgrade handling to an existing HTTP server.
+ * Attaches Twilio Media Streams and portal agent-test WebSocket upgrade handling.
  */
 export function attachTwilioMediaStreamUpgrade(server: http.Server): void {
-  const path = getVoiceMediaStreamPath();
-  const wss = new WebSocketServer({ noServer: true });
+  const twilioPath = getVoiceMediaStreamPath();
+  const testPath = getVoiceTestStreamPath();
+  const twilioWss = new WebSocketServer({ noServer: true });
+  const testWss = new WebSocketServer({ noServer: true });
+
+  twilioWss.on("connection", (ws) => {
+    new TwilioMediaStreamHandler(ws);
+  });
+
+  testWss.on("connection", (ws, request) => {
+    const url = new URL(request.url ?? "/", `http://${request.headers.host}`);
+    const sessionId = url.searchParams.get("sessionId")?.trim();
+    const token = url.searchParams.get("token")?.trim();
+    if (!sessionId || !token) {
+      console.error("[agent-test-stream] Missing sessionId or token");
+      ws.close();
+      return;
+    }
+    void validateTestCallSessionToken(sessionId, token).then((session) => {
+      if (!session) {
+        console.error("[agent-test-stream] Invalid session or token");
+        ws.close();
+        return;
+      }
+      new AgentTestMediaStreamHandler(ws, sessionId);
+    });
+  });
 
   server.on("upgrade", (request, socket, head) => {
     const url = new URL(request.url ?? "/", `http://${request.headers.host}`);
     const reqPath = url.pathname;
-    if (reqPath !== path) {
-      // Next dev HMR uses /_next/webpack-hmr — never destroy; ignore silently.
-      if (reqPath.startsWith("/_next")) {
-        return;
-      }
+
+    if (reqPath === twilioPath) {
       agentDebugLog({
         location: "twilio-media-stream-server.ts:upgrade",
-        message: "ws upgrade path rejected",
+        message: "ws upgrade accepted",
         hypothesisId: "H3",
-        data: { reqPath, expectedPath: path },
+        data: { reqPath },
       });
-      socket.destroy();
+      twilioWss.handleUpgrade(request, socket, head, (ws) => {
+        twilioWss.emit("connection", ws, request);
+      });
+      return;
+    }
+
+    if (reqPath === testPath) {
+      agentDebugLog({
+        location: "twilio-media-stream-server.ts:upgrade",
+        message: "agent test ws upgrade accepted",
+        hypothesisId: "H3",
+        data: { reqPath },
+      });
+      testWss.handleUpgrade(request, socket, head, (ws) => {
+        testWss.emit("connection", ws, request);
+      });
+      return;
+    }
+
+    if (reqPath.startsWith("/_next")) {
       return;
     }
 
     agentDebugLog({
       location: "twilio-media-stream-server.ts:upgrade",
-      message: "ws upgrade accepted",
+      message: "ws upgrade path rejected",
       hypothesisId: "H3",
-      data: { reqPath: url.pathname },
+      data: { reqPath, twilioPath, testPath },
     });
-
-    wss.handleUpgrade(request, socket, head, (ws) => {
-      wss.emit("connection", ws, request);
-    });
-  });
-
-  wss.on("connection", (ws) => {
-    new TwilioMediaStreamHandler(ws);
+    socket.destroy();
   });
 }
 
@@ -55,7 +93,8 @@ export function attachTwilioMediaStreamUpgrade(server: http.Server): void {
  */
 export function startTwilioMediaStreamServer(): http.Server {
   const port = getVoiceMediaStreamPort();
-  const path = getVoiceMediaStreamPath();
+  const twilioPath = getVoiceMediaStreamPath();
+  const testPath = getVoiceTestStreamPath();
 
   const server = httpLib.createServer((_req, res) => {
     res.writeHead(200, { "Content-Type": "text/plain" });
@@ -66,7 +105,7 @@ export function startTwilioMediaStreamServer(): http.Server {
 
   server.listen(port, () => {
     console.info(
-      `[media-stream] WebSocket listening on port ${port} path ${path}`,
+      `[media-stream] WebSocket listening on port ${port} paths ${twilioPath} ${testPath}`,
     );
   });
 

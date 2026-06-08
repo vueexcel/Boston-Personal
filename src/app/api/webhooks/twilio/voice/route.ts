@@ -18,6 +18,7 @@ import {
 import { normalizeInboundToE164 } from "@/lib/utils/phone-format";
 import { createCallRecordTransact } from "@/lib/services/calls";
 import { loadCallAgentContext } from "@/lib/services/twilio-call-agent";
+import { initialCollectedMap } from "@/lib/services/call-collected-info";
 import { createCallSession } from "@/lib/voice/call-session";
 import { getTwilioMediaStreamWssUrl } from "@/lib/env/server";
 import { getTwilioVoiceStatusWebhookUrl } from "@/lib/webhooks/twilio-app-url";
@@ -158,6 +159,7 @@ export async function POST(request: Request): Promise<Response> {
       startedAt: new Date().toISOString(),
       agentSnapshot,
       greetingPlayed: false,
+      collectedInfo: initialCollectedMap(agentSnapshot.infoToCollect),
     });
 
     try {

@@ -4,9 +4,18 @@ import { getServerEnv } from "@/lib/env/server";
 import { resolveSystemPromptForAgent } from "@/lib/services/openai-agent";
 import { resolveConvaiTtsVoiceId } from "@/lib/services/elevenlabs-voice-resolve";
 import { getAgentForTenant } from "@/lib/services/agents";
-import { PHONE_CONVERSATION_STYLE } from "@/lib/voice/phone-conversation-style";
+import { resolveLocalizedGreeting } from "@/lib/services/greeting-translate";
+import { screenRuntimeUserMessage } from "@/lib/prompt-content-safety-patterns";
+import { buildPhoneConversationStyleBlock } from "@/lib/services/prompt-assembler";
 import { SentenceBuffer } from "@/lib/voice/sentence-buffer";
+import {
+  formatCollectedInfoBlock,
+  type CollectedInfoMap,
+} from "@/lib/services/call-collected-info";
+import { parseAgentPortalConfig } from "@/lib/tenant-portal/agent-config-v1";
 import { getVoiceOpenAiModel } from "@/lib/voice/voice-tuning";
+import type { AgentTestDraft } from "@/lib/validation/agent-test";
+import type { AgentDetail } from "@/lib/services/agents";
 
 export type CallChatMessage = {
   role: "user" | "assistant";
@@ -16,17 +25,47 @@ export type CallChatMessage = {
 export type CallAgentSnapshot = {
   tenantId: string;
   agentId: string;
+  agentName: string;
   systemPrompt: string;
   greeting: string | null;
   voiceId: string;
+  voiceGender: string | null;
   language: string | null;
   maxDurationSec: number;
   sttLanguage: string;
+  infoToCollect: string[];
 };
 
+function genderPersonaPhrase(gender: string | null): string | null {
+  if (!gender?.trim()) return null;
+  const g = gender.trim().toLowerCase();
+  if (g === "female") return "Speak as a female assistant (matches your synthesized voice).";
+  if (g === "male") return "Speak as a male assistant (matches your synthesized voice).";
+  if (g === "neutral") {
+    return "Use a neutral, professional tone (matches your synthesized voice).";
+  }
+  return null;
+}
+
+export function buildVoicePersonaBlock(snapshot: CallAgentSnapshot): string {
+  const lines: string[] = ["# Voice persona"];
+  if (snapshot.agentName.trim()) {
+    lines.push(
+      `- Your name on this call: ${snapshot.agentName.trim()}`,
+    );
+  }
+  const genderLine = genderPersonaPhrase(snapshot.voiceGender);
+  if (genderLine) lines.push(`- ${genderLine}`);
+  lines.push(
+    "- Use consistent first-person pronouns (I/me/my) matching this persona.",
+    "- Do not claim you have no name or gender unless the caller explicitly asks you to clarify you are automated.",
+  );
+  return lines.join("\n");
+}
+
 const DEFAULT_MAX_DURATION_SEC = 600;
-const VOICE_MAX_TOKENS = 120;
-const VOICE_TEMPERATURE = 0.55;
+export const VOICE_MAX_TOKENS = 120;
+export const VOICE_TEMPERATURE = 0.55;
 
 function mapLanguageToStt(language: string | null): string {
   if (!language?.trim()) return "en-US";
@@ -35,19 +74,136 @@ function mapLanguageToStt(language: string | null): string {
   return l;
 }
 
-function buildVoiceSystemPrompt(snapshot: CallAgentSnapshot): string {
-  return `${snapshot.systemPrompt}\n\n${PHONE_CONVERSATION_STYLE}\n\n[tenant=${snapshot.tenantId}]`;
+export function resolveInfoToCollect(
+  agent: AgentDetail,
+  draft?: AgentTestDraft,
+): string[] {
+  if (draft?.portalConfig?.infoToCollect) {
+    return draft.portalConfig.infoToCollect.filter((s) => s.trim());
+  }
+  const { config } = parseAgentPortalConfig(agent.roleDescription);
+  return config.infoToCollect.filter((s) => s.trim());
+}
+
+export function buildVoiceSystemPrompt(
+  snapshot: CallAgentSnapshot,
+  collectedInfo?: CollectedInfoMap,
+): string {
+  const collectedBlock = formatCollectedInfoBlock(
+    snapshot.infoToCollect,
+    collectedInfo ?? {},
+  );
+  const parts = [
+    snapshot.systemPrompt,
+    buildPhoneConversationStyleBlock(),
+    buildVoicePersonaBlock(snapshot),
+    collectedBlock,
+    `[tenant=${snapshot.tenantId}]`,
+  ].filter((p) => p.trim());
+  return parts.join("\n\n");
+}
+
+export type LoadTestAgentContextResult = {
+  snapshot: CallAgentSnapshot;
+  voiceWarning?: string;
+};
+
+async function resolveMaxDurationSec(
+  tenantId: string,
+  agentId: string,
+): Promise<number> {
+  const supabase = createServerSupabase();
+  const { data: settings } = await supabase
+    .from("agent_advanced_settings")
+    .select("max_duration")
+    .eq("tenant_id", tenantId)
+    .eq("agent_id", agentId)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  let maxDurationSec = DEFAULT_MAX_DURATION_SEC;
+  if (
+    settings?.max_duration != null &&
+    typeof settings.max_duration === "number"
+  ) {
+    maxDurationSec = Math.max(60, Math.min(settings.max_duration, 3600));
+  }
+  return maxDurationSec;
+}
+
+/**
+ * Loads agent configuration for portal voice/text tests (supports unsaved drafts).
+ */
+export async function loadTestAgentContext(
+  tenantId: string,
+  agentId: string,
+  draft?: AgentTestDraft,
+): Promise<LoadTestAgentContextResult> {
+  const agent = await getAgentForTenant(tenantId, agentId);
+  if (!agent) {
+    throw new Error("Agent not found");
+  }
+
+  const systemPrompt = await resolveSystemPromptForAgent(tenantId, agentId, {
+    draft,
+    persist: false,
+  });
+
+  const voiceId =
+    draft?.voiceId !== undefined ? draft.voiceId : agent.voiceId;
+  const language =
+    draft?.language !== undefined ? draft.language : agent.language;
+  const greeting =
+    draft?.greeting !== undefined ? draft.greeting : agent.greeting;
+
+  const resolvedVoice = await resolveConvaiTtsVoiceId(voiceId);
+  if (!resolvedVoice.voiceId) {
+    throw new Error(
+      resolvedVoice.warning ??
+        "No valid ElevenLabs voice configured for this agent.",
+    );
+  }
+
+  const maxDurationSec = await resolveMaxDurationSec(tenantId, agentId);
+
+  const localizedGreeting = await resolveLocalizedGreeting({
+    text: greeting,
+    targetLanguage: language,
+  });
+
+  return {
+    snapshot: {
+      tenantId,
+      agentId,
+      agentName: agent.name,
+      systemPrompt,
+      greeting: localizedGreeting,
+      voiceId: resolvedVoice.voiceId,
+      voiceGender: resolvedVoice.voiceGender ?? null,
+      language,
+      maxDurationSec,
+      sttLanguage: mapLanguageToStt(language),
+      infoToCollect: resolveInfoToCollect(agent, draft),
+    },
+    voiceWarning: resolvedVoice.warning,
+  };
 }
 
 function buildOpenAiMessages(
   snapshot: CallAgentSnapshot,
   messages: CallChatMessage[],
   userText: string,
+  collectedInfo?: CollectedInfoMap,
 ): { role: "system" | "user" | "assistant"; content: string }[] {
   const openAiMessages: {
     role: "system" | "user" | "assistant";
     content: string;
-  }[] = [{ role: "system", content: buildVoiceSystemPrompt(snapshot) }];
+  }[] = [
+    {
+      role: "system",
+      content: buildVoiceSystemPrompt(snapshot, collectedInfo),
+    },
+  ];
 
   for (const m of messages) {
     openAiMessages.push({ role: m.role, content: m.content });
@@ -83,29 +239,25 @@ export async function loadCallAgentContext(
     );
   }
 
-  const supabase = createServerSupabase();
-  const { data: settings } = await supabase
-    .from("agent_advanced_settings")
-    .select("max_duration")
-    .eq("tenant_id", tenantId)
-    .eq("agent_id", agentId)
-    .is("deleted_at", null)
-    .maybeSingle();
+  const maxDurationSec = await resolveMaxDurationSec(tenantId, agentId);
 
-  let maxDurationSec = DEFAULT_MAX_DURATION_SEC;
-  if (settings?.max_duration != null && typeof settings.max_duration === "number") {
-    maxDurationSec = Math.max(60, Math.min(settings.max_duration, 3600));
-  }
+  const localizedGreeting = await resolveLocalizedGreeting({
+    text: agent.greeting,
+    targetLanguage: agent.language,
+  });
 
   return {
     tenantId,
     agentId,
+    agentName: agent.name,
     systemPrompt,
-    greeting: agent.greeting?.trim() || null,
+    greeting: localizedGreeting,
     voiceId: resolvedVoice.voiceId,
+    voiceGender: resolvedVoice.voiceGender ?? null,
     language: agent.language,
     maxDurationSec,
     sttLanguage: mapLanguageToStt(agent.language),
+    infoToCollect: resolveInfoToCollect(agent),
   };
 }
 
@@ -123,6 +275,7 @@ export async function runCallTurnStream(
   messages: CallChatMessage[],
   userText: string,
   callbacks: CallTurnStreamCallbacks,
+  collectedInfo?: CollectedInfoMap,
 ): Promise<{ fullReply: string; model: string }> {
   const env = getServerEnv();
   if (!env.OPENAI_API_KEY?.trim()) {
@@ -132,6 +285,12 @@ export async function runCallTurnStream(
   const trimmedUser = userText.trim();
   if (!trimmedUser) {
     throw new Error("Empty user transcript");
+  }
+
+  const screen = screenRuntimeUserMessage(trimmedUser);
+  if (!screen.allowed && screen.safeReply) {
+    await callbacks.onSentence(screen.safeReply);
+    return { fullReply: screen.safeReply, model: "content-safety" };
   }
 
   const client = getOpenAIClient();
@@ -144,7 +303,12 @@ export async function runCallTurnStream(
     max_tokens: VOICE_MAX_TOKENS,
     temperature: VOICE_TEMPERATURE,
     stream: true,
-    messages: buildOpenAiMessages(snapshot, messages, trimmedUser),
+    messages: buildOpenAiMessages(
+      snapshot,
+      messages,
+      trimmedUser,
+      collectedInfo,
+    ),
   });
 
   let firstToken = true;

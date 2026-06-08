@@ -1,4 +1,5 @@
-import { apiGet, apiPost } from "@/lib/api/http";
+import { apiPost } from "@/lib/api/http";
+import type { ScribeClientConnectConfig } from "@/lib/voice/scribe-client-config";
 import type {
   AgentTestChatBody,
   AgentTestDraft,
@@ -26,58 +27,45 @@ export async function postAgentTestChat(
   );
 }
 
-export type AgentTestSyncResult = {
-  elevenLabsAgentId: string;
-  synced: boolean;
+export type AgentTestVoiceSessionResult = {
+  sessionId: string;
+  token: string;
+  wsUrl: string;
+  expiresAt: string;
   resolvedVoiceId: string | null;
   voiceWarning: string | null;
+  sttClientConfig: ScribeClientConnectConfig;
 };
 
-export async function postAgentTestSync(
+export type AgentTestScribeTokenBody = {
+  sessionId: string;
+  sessionToken: string;
+};
+
+export type AgentTestScribeTokenResult = {
+  token: string;
+};
+
+export async function postAgentTestVoiceSession(
   tenantId: string,
   agentId: string,
   body: AgentTestSyncBody = {},
-): Promise<AgentTestSyncResult> {
-  return apiPost<AgentTestSyncResult>(
-    `${agentTestPath(tenantId, agentId)}/sync`,
+): Promise<AgentTestVoiceSessionResult> {
+  return apiPost<AgentTestVoiceSessionResult>(
+    `${agentTestPath(tenantId, agentId)}/voice/session`,
     body,
   );
 }
 
-export type AgentTestSignedUrlResult = {
-  elevenLabsAgentId: string;
-  signedUrl: string;
-  resolvedVoiceId?: string | null;
-  voiceWarning?: string | null;
-};
-
-function encodeDraftQueryParam(draft: AgentTestDraft): string {
-  const json = JSON.stringify(draft);
-  if (typeof Buffer !== "undefined") {
-    return Buffer.from(json, "utf8").toString("base64url");
-  }
-  const bytes = new TextEncoder().encode(json);
-  let binary = "";
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]!);
-  }
-  return btoa(binary)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-}
-
-export async function getAgentTestSignedUrl(
+export async function postAgentTestScribeToken(
   tenantId: string,
   agentId: string,
-  draft?: AgentTestDraft,
-): Promise<AgentTestSignedUrlResult> {
-  const base = `${agentTestPath(tenantId, agentId)}/signed-url`;
-  if (!draft) {
-    return apiGet<AgentTestSignedUrlResult>(base);
-  }
-  const encoded = encodeDraftQueryParam(draft);
-  return apiGet<AgentTestSignedUrlResult>(
-    `${base}?draft=${encodeURIComponent(encoded)}`,
+  body: AgentTestScribeTokenBody,
+): Promise<AgentTestScribeTokenResult> {
+  return apiPost<AgentTestScribeTokenResult>(
+    `${agentTestPath(tenantId, agentId)}/voice/scribe-token`,
+    body,
   );
 }
+
+export type { AgentTestDraft, ScribeClientConnectConfig };

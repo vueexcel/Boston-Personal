@@ -5,6 +5,10 @@ import {
   type WizardTemplateId,
 } from "@/lib/validation/agents-create";
 import { updateAgentBodySchema } from "@/lib/validation/agents-update";
+import {
+  assertContentSafeForAgentUpdate,
+  type SafetyIssue,
+} from "@/lib/services/prompt-content-safety";
 
 const WIZARD_COPY: Record<
   WizardTemplateId,
@@ -183,11 +187,16 @@ export async function getAgentForTenant(
 /**
  * Updates an agent row (partial).
  */
+export type UpdateAgentResult = {
+  agent: AgentDetail;
+  warnings: SafetyIssue[];
+};
+
 export async function updateAgentForTenant(
   tenantId: string,
   agentId: string,
   input: unknown,
-): Promise<AgentSummary> {
+): Promise<UpdateAgentResult> {
   noStore();
   const parsed = updateAgentBodySchema.parse(input);
 
@@ -196,6 +205,25 @@ export async function updateAgentForTenant(
     const err = new Error("AGENT_NOT_FOUND");
     (err as Error & { code?: string }).code = "AGENT_NOT_FOUND";
     throw err;
+  }
+
+  const nextGreeting =
+    parsed.greeting !== undefined ? parsed.greeting : existing.greeting;
+  const nextRoleDescription =
+    parsed.roleDescription !== undefined
+      ? parsed.roleDescription
+      : existing.roleDescription;
+
+  let contentWarnings: SafetyIssue[] = [];
+  if (
+    parsed.greeting !== undefined ||
+    parsed.roleDescription !== undefined
+  ) {
+    const safety = await assertContentSafeForAgentUpdate({
+      greeting: nextGreeting,
+      roleDescription: nextRoleDescription,
+    });
+    contentWarnings = safety.issues.filter((i) => i.severity === "warning");
   }
 
   const patch: Record<string, unknown> = {};
@@ -219,7 +247,7 @@ export async function updateAgentForTenant(
     .eq("tenant_id", tenantId)
     .is("deleted_at", null)
     .select(
-      "id, tenant_id, name, status, role_description, greeting, created_at",
+      "id, tenant_id, name, status, role_description, greeting, voice_id, voice_provider_id, language, created_at",
     )
     .maybeSingle();
 
@@ -234,9 +262,9 @@ export async function updateAgentForTenant(
     throw err;
   }
 
-  const mapped = mapAgentRow(data as unknown as Record<string, unknown>);
+  const mapped = mapAgentDetailRow(data as unknown as Record<string, unknown>);
   if (!mapped) throw new Error("Failed to parse updated agent");
-  return mapped;
+  return { agent: mapped, warnings: contentWarnings };
 }
 
 /**
@@ -295,7 +323,7 @@ export async function createAgentForTenant(
       greeting,
       voice_provider_id: null,
       voice_id: null,
-      language: "en-US",
+      language: "en",
       status: "DRAFT",
       deleted_at: null,
     })

@@ -1,18 +1,14 @@
 "use client";
 
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import {
-  getAgentTestSignedUrl,
   postAgentTestChat,
-  postAgentTestSync,
+  postAgentTestVoiceSession,
   type AgentTestChatResult,
-  type AgentTestSignedUrlResult,
-  type AgentTestSyncResult,
+  type AgentTestVoiceSessionResult,
 } from "@/lib/api/agent-test";
-import { queryKeys } from "@/lib/api/query-keys";
 import type {
   AgentTestChatBody,
-  AgentTestDraft,
   AgentTestSyncBody,
 } from "@/lib/validation/agent-test";
 
@@ -23,36 +19,11 @@ export function useAgentTestChat(tenantId: string, agentId: string) {
   });
 }
 
-export function useAgentTestSync(tenantId: string, agentId: string) {
+export function useAgentTestVoiceSession(tenantId: string, agentId: string) {
   return useMutation({
     mutationFn: (body: AgentTestSyncBody = {}) =>
-      postAgentTestSync(tenantId, agentId, body),
+      postAgentTestVoiceSession(tenantId, agentId, body),
   });
 }
 
-export function useAgentTestSignedUrl(
-  tenantId: string,
-  agentId: string,
-  options: { enabled?: boolean; draft?: AgentTestDraft },
-) {
-  return useQuery({
-    queryKey: [
-      ...queryKeys.agents.testSignedUrl(tenantId, agentId),
-      options.draft ? "draft" : "saved",
-    ],
-    queryFn: () => getAgentTestSignedUrl(tenantId, agentId, options.draft),
-    enabled:
-      Boolean(tenantId) &&
-      Boolean(agentId) &&
-      (options.enabled ?? false),
-    staleTime: 0,
-    gcTime: 0,
-    retry: false,
-  });
-}
-
-export type {
-  AgentTestChatResult,
-  AgentTestSignedUrlResult,
-  AgentTestSyncResult,
-};
+export type { AgentTestChatResult, AgentTestVoiceSessionResult };

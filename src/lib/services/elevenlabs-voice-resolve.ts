@@ -5,6 +5,8 @@ export type ResolveConvaiVoiceResult = {
   voiceId: string | null;
   /** Human-readable warning when the requested id was invalid or missing. */
   warning?: string;
+  /** ElevenLabs voice label gender for prompt persona, e.g. female / male */
+  voiceGender?: string | null;
 };
 
 let voiceIdCache: {
@@ -12,6 +14,7 @@ let voiceIdCache: {
   ids: Set<string>;
   defaultVoiceId: string | null;
   labels: Map<string, string>;
+  genders: Map<string, string | null>;
 } | null = null;
 
 const VOICE_CACHE_TTL_MS = 60_000;
@@ -20,6 +23,7 @@ async function loadAccountVoiceIndex(): Promise<{
   ids: Set<string>;
   defaultVoiceId: string | null;
   labels: Map<string, string>;
+  genders: Map<string, string | null>;
 }> {
   const now = Date.now();
   if (voiceIdCache && voiceIdCache.expiresAt > now) {
@@ -27,6 +31,7 @@ async function loadAccountVoiceIndex(): Promise<{
       ids: voiceIdCache.ids,
       defaultVoiceId: voiceIdCache.defaultVoiceId,
       labels: voiceIdCache.labels,
+      genders: voiceIdCache.genders,
     };
   }
 
@@ -37,9 +42,11 @@ async function loadAccountVoiceIndex(): Promise<{
 
   const ids = new Set<string>();
   const labels = new Map<string, string>();
+  const genders = new Map<string, string | null>();
   for (const v of voices) {
     ids.add(v.voiceId);
     labels.set(v.voiceId, v.name);
+    genders.set(v.voiceId, v.gender);
   }
 
   const premade =
@@ -51,9 +58,20 @@ async function loadAccountVoiceIndex(): Promise<{
     ids,
     defaultVoiceId,
     labels,
+    genders,
   };
 
-  return { ids, defaultVoiceId, labels };
+  return { ids, defaultVoiceId, labels, genders };
+}
+
+/** Resolve ElevenLabs gender label for a voice id (cached). */
+export async function resolveVoiceGender(
+  voiceId: string | null | undefined,
+): Promise<string | null> {
+  const id = voiceId?.trim();
+  if (!id) return null;
+  const { genders } = await loadAccountVoiceIndex();
+  return genders.get(id) ?? null;
 }
 
 function formatVoiceLabel(voiceId: string, labels: Map<string, string>): string {
@@ -71,12 +89,14 @@ export async function resolveConvaiTtsVoiceId(
   preferredVoiceId: string | null | undefined,
 ): Promise<ResolveConvaiVoiceResult> {
   const requested = preferredVoiceId?.trim();
-  const { ids, defaultVoiceId, labels } = await loadAccountVoiceIndex();
+  const { ids, defaultVoiceId, labels, genders } =
+    await loadAccountVoiceIndex();
 
   if (!requested) {
     if (defaultVoiceId) {
       return {
         voiceId: defaultVoiceId,
+        voiceGender: genders.get(defaultVoiceId) ?? null,
         warning: `No voice selected on this agent. Using ${formatVoiceLabel(defaultVoiceId, labels)} for the test session.`,
       };
     }
@@ -92,19 +112,26 @@ export async function resolveConvaiTtsVoiceId(
   }
 
   if (ids.has(requested)) {
-    return { voiceId: requested };
+    return {
+      voiceId: requested,
+      voiceGender: genders.get(requested) ?? null,
+    };
   }
 
   const caseMatch = Array.from(ids).find(
     (id) => id.toLowerCase() === requested.toLowerCase(),
   );
   if (caseMatch) {
-    return { voiceId: caseMatch };
+    return {
+      voiceId: caseMatch,
+      voiceGender: genders.get(caseMatch) ?? null,
+    };
   }
 
   if (defaultVoiceId) {
     return {
       voiceId: defaultVoiceId,
+      voiceGender: genders.get(defaultVoiceId) ?? null,
       warning: `Voice "${requested}" was not found in your ElevenLabs account. Using ${formatVoiceLabel(defaultVoiceId, labels)} instead. Choose a valid voice on the Voice tab and save.`,
     };
   }

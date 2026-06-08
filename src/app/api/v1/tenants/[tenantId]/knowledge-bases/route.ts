@@ -5,6 +5,7 @@ import {
   createKnowledgeBase,
   listKnowledgeBases,
 } from "@/lib/services/knowledge-bases";
+import { ContentSafetyViolationError } from "@/lib/services/prompt-content-safety";
 import { createKnowledgeBaseBodySchema } from "@/lib/validation/knowledge-bases";
 import { tenantIdSchema } from "@/lib/validation/tenant-id";
 
@@ -98,6 +99,16 @@ export async function POST(
     const knowledgeBase = await createKnowledgeBase(tenantId, parsed.data);
     return jsonEnvelope(okEnvelope({ knowledgeBase }), { status: 201 });
   } catch (e) {
+    if (e instanceof ContentSafetyViolationError) {
+      return jsonEnvelope(
+        errEnvelope({
+          code: e.code,
+          message: e.message,
+          details: { issues: e.issues },
+        }),
+        { status: 400 },
+      );
+    }
     const message = e instanceof Error ? e.message : "Unexpected error";
     return jsonEnvelope(
       errEnvelope({ code: "DATASTORE_ERROR", message }),

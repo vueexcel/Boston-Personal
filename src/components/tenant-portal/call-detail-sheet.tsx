@@ -213,6 +213,55 @@ export function CallDetailSheet({
               </p>
             </div>
 
+            {call.collectedInfo.length > 0 && (
+              <div className="space-y-2">
+                <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+                  Information collected
+                </h3>
+                <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        <th className="px-4 py-2">Field</th>
+                        <th className="px-4 py-2">Value</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {call.collectedInfo.map((item) => (
+                        <tr
+                          key={item.field}
+                          className="border-b border-slate-100 last:border-0"
+                        >
+                          <td className="px-4 py-2 font-medium text-slate-700">
+                            {item.field}
+                          </td>
+                          <td className="px-4 py-2 text-slate-800">
+                            {item.value?.trim() ? (
+                              <span>
+                                {item.value}
+                                {item.status === "corrected" && (
+                                  <Badge
+                                    variant="secondary"
+                                    className="ml-2 text-xs"
+                                  >
+                                    Corrected
+                                  </Badge>
+                                )}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400">
+                                Not provided
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-2">
               <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
                 Sentiment

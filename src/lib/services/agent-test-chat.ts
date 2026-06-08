@@ -1,7 +1,14 @@
 import { getOpenAIClient } from "@/lib/integrations/openai";
 import { getServerEnv } from "@/lib/env/server";
-import { resolveSystemPromptForAgent } from "@/lib/services/openai-agent";
 import { getAgentForTenant } from "@/lib/services/agents";
+import { screenRuntimeUserMessage } from "@/lib/prompt-content-safety-patterns";
+import {
+  buildVoiceSystemPrompt,
+  loadTestAgentContext,
+  VOICE_MAX_TOKENS,
+  VOICE_TEMPERATURE,
+} from "@/lib/services/twilio-call-agent";
+import { getVoiceOpenAiModel } from "@/lib/voice/voice-tuning";
 import type { AgentTestDraft } from "@/lib/validation/agent-test";
 
 export type AgentTestChatMessage = {
@@ -23,7 +30,7 @@ export type RunAgentTestChatResult = {
 };
 
 /**
- * Multi-turn text test chat using the agent system prompt and OpenAI.
+ * Multi-turn text test chat using the same prompt and LLM settings as live calls.
  */
 export async function runAgentTestChat(
   params: RunAgentTestChatParams,
@@ -38,42 +45,53 @@ export async function runAgentTestChat(
     throw new Error("Agent not found");
   }
 
-  const systemPrompt = await resolveSystemPromptForAgent(
+  const { snapshot } = await loadTestAgentContext(
     params.tenantId,
     params.agentId,
-    { draft: params.draft, persist: false },
+    params.draft,
   );
 
-  const greeting =
-    params.draft?.greeting !== undefined
-      ? params.draft.greeting?.trim() || null
-      : agent.greeting?.trim() || null;
+  const greeting = snapshot.greeting?.trim() || null;
+  const systemPrompt = buildVoiceSystemPrompt(snapshot);
+  const model = getVoiceOpenAiModel();
+
+  if (params.messages.length === 0) {
+    return {
+      reply: greeting ?? "",
+      model,
+      greetingUsed: greeting,
+    };
+  }
 
   const openAiMessages: {
     role: "system" | "user" | "assistant";
     content: string;
-  }[] = [
-    {
-      role: "system",
-      content: `${systemPrompt}\n\n[tenant=${params.tenantId}]`,
-    },
-  ];
-
-  if (params.messages.length === 0 && greeting) {
-    return { reply: greeting, model: env.OPENAI_MODEL?.trim() || "gpt-4o", greetingUsed: greeting };
-  }
+  }[] = [{ role: "system", content: systemPrompt }];
 
   for (const m of params.messages) {
     openAiMessages.push({ role: m.role, content: m.content });
   }
 
+  const lastUser = [...params.messages]
+    .reverse()
+    .find((m) => m.role === "user");
+  if (lastUser) {
+    const screen = screenRuntimeUserMessage(lastUser.content);
+    if (!screen.allowed && screen.safeReply) {
+      return {
+        reply: screen.safeReply,
+        model: "content-safety",
+        greetingUsed: greeting,
+      };
+    }
+  }
+
   const client = getOpenAIClient();
-  const model = env.OPENAI_MODEL?.trim() || "gpt-4o";
 
   const completion = await client.chat.completions.create({
     model,
-    max_tokens: 1024,
-    temperature: 0.4,
+    max_tokens: VOICE_MAX_TOKENS,
+    temperature: VOICE_TEMPERATURE,
     messages: openAiMessages,
   });
 

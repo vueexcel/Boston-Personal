@@ -2,10 +2,10 @@ import { z } from "zod";
 import { errEnvelope, jsonEnvelope, okEnvelope } from "@/lib/api/response";
 import { requireTenantApiAccess } from "@/lib/auth/tenant-access";
 import { uuidSchema } from "@/lib/db/schema";
-import {
-  ensureConvaiAgentForBostelAgent,
-} from "@/lib/services/elevenlabs-convai-agent";
-import { syncAgentPromptToElevenLabs } from "@/lib/services/openai-agent";
+import { getVoiceTestStreamWssUrl } from "@/lib/env/server";
+import { loadTestAgentContext } from "@/lib/services/twilio-call-agent";
+import { getScribeClientConnectConfig } from "@/lib/voice/scribe-client-config";
+import { createTestCallSession } from "@/lib/voice/test-call-session";
 import { agentTestSyncBodySchema } from "@/lib/validation/agent-test";
 import { tenantIdSchema } from "@/lib/validation/tenant-id";
 
@@ -67,32 +67,44 @@ export async function POST(
   }
 
   try {
-    const elevenLabsAgentId = await ensureConvaiAgentForBostelAgent(
+    const { snapshot, voiceWarning } = await loadTestAgentContext(
       tenantId,
       agentId,
       draft,
     );
-    const synced = await syncAgentPromptToElevenLabs(agentId, {
-      elevenLabsAgentId,
-      regenerate: !draft,
-      draft,
-      persist: false,
+    const { session, expiresAt } = await createTestCallSession({
+      tenantId,
+      agentId,
+      agentSnapshot: snapshot,
     });
+
+    const baseWsUrl = getVoiceTestStreamWssUrl();
+    const wsUrl = `${baseWsUrl}?sessionId=${encodeURIComponent(session.sessionId)}&token=${encodeURIComponent(session.token)}`;
+
+    const sttClientConfig = getScribeClientConnectConfig(
+      snapshot.language ?? snapshot.sttLanguage,
+    );
+
     return jsonEnvelope(
       okEnvelope({
-        elevenLabsAgentId: synced.elevenLabsAgentId,
-        synced: true,
-        resolvedVoiceId: synced.resolvedVoiceId ?? null,
-        voiceWarning: synced.voiceWarning ?? null,
+        sessionId: session.sessionId,
+        token: session.token,
+        wsUrl,
+        expiresAt,
+        resolvedVoiceId: snapshot.voiceId,
+        voiceWarning: voiceWarning ?? null,
+        sttClientConfig,
       }),
     );
   } catch (e) {
     const message = e instanceof Error ? e.message : "Unexpected error";
-    const code = message.includes("ELEVENLABS")
-      ? "ELEVENLABS_NOT_CONFIGURED"
-      : "AGENT_TEST_SYNC_ERROR";
-    return jsonEnvelope(errEnvelope({ code, message }), {
-      status: code === "ELEVENLABS_NOT_CONFIGURED" ? 503 : 500,
-    });
+    const code = message.includes("not configured")
+      ? "VOICE_NOT_CONFIGURED"
+      : message.includes("not found")
+        ? "NOT_FOUND"
+        : "AGENT_TEST_VOICE_SESSION_ERROR";
+    const status =
+      code === "NOT_FOUND" ? 404 : code === "VOICE_NOT_CONFIGURED" ? 503 : 500;
+    return jsonEnvelope(errEnvelope({ code, message }), { status });
   }
 }

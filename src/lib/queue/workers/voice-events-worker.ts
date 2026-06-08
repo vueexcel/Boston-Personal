@@ -2,6 +2,8 @@ import { Worker, type Job } from "bullmq";
 import { createBullmqConnection } from "@/lib/queue/connection";
 import { VOICE_EVENTS_QUEUE } from "@/lib/queue/queues";
 import { fetchTwilioCallPrice } from "@/lib/integrations/twilio-recordings";
+import { extractCallCollectedInfo } from "@/lib/services/call-collected-info";
+import { getAgentForTenant } from "@/lib/services/agents";
 import {
   dispositionLabel,
   getMetadataString,
@@ -12,6 +14,7 @@ import {
   updateCallLogByProviderId,
 } from "@/lib/services/calls";
 import { summarizeCall } from "@/lib/services/openai-agent";
+import { resolveInfoToCollect } from "@/lib/services/twilio-call-agent";
 
 export type VoiceEventJobData = {
   tenantId: string;
@@ -84,6 +87,26 @@ async function processInboundCompleted(
       metadataPatch.actionItems = analysis.action_items;
     } catch (e) {
       console.error("[voice-events] summarize failed", e);
+    }
+
+    if (row.agentId) {
+      try {
+        const agent = await getAgentForTenant(tenantId, row.agentId);
+        if (agent) {
+          const infoToCollect = resolveInfoToCollect(agent);
+          if (infoToCollect.length > 0) {
+            const collectedInfo = await extractCallCollectedInfo(
+              transcript,
+              infoToCollect,
+            );
+            metadataPatch.collectedInfo = collectedInfo;
+            metadataPatch.collectedInfoExtractedAt =
+              new Date().toISOString();
+          }
+        }
+      } catch (e) {
+        console.error("[voice-events] collected-info extraction failed", e);
+      }
     }
   }
 

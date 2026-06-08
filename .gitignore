@@ -20,6 +20,9 @@
 .DS_Store
 *.pem
 
+# voice pipeline session logs (VOICE_LOG_DIR)
+/logs/voice/
+
 # debug
 npm-debug.log*
 yarn-debug.log*

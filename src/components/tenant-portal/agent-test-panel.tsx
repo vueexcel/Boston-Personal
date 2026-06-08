@@ -2,25 +2,28 @@
 
 import * as React from "react";
 import dynamic from "next/dynamic";
-import { Loader2, MessageSquare, Mic, Radio } from "lucide-react";
+import { Loader2, MessageSquare, Mic } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { ApiClientError } from "@/lib/api/http";
-import { useAgentTestChat } from "@/hooks/use-agent-test";
 import {
-  getAgentTestSignedUrl,
-  postAgentTestSync,
-} from "@/lib/api/agent-test";
+  useAgentTestChat,
+  useAgentTestVoiceSession,
+} from "@/hooks/use-agent-test";
+import type { ScribeClientConnectConfig } from "@/lib/voice/scribe-client-config";
 import type { AgentTestDraft } from "@/lib/validation/agent-test";
 import { cn } from "@/lib/utils";
 
-const ElevenLabsVoiceCall = dynamic(
+const ProductionVoiceCall = dynamic(
   () =>
-    import("@/components/tenant-portal/elevenlabs-voice-call").then(
-      (m) => m.ElevenLabsVoiceCall,
+    import("@/components/tenant-portal/production-voice-call").then(
+      (m) => m.ProductionVoiceCall,
     ),
-  { ssr: false, loading: () => <p className="text-sm text-slate-500">Loading voice…</p> },
+  {
+    ssr: false,
+    loading: () => <p className="text-sm text-slate-500">Loading voice…</p>,
+  },
 );
 
 export type AgentTestPanelProps = {
@@ -59,23 +62,18 @@ export function AgentTestPanel({
   const scrollRef = React.useRef<HTMLDivElement>(null);
 
   const chatMutation = useAgentTestChat(tenantId, agentId);
+  const voiceSessionMutation = useAgentTestVoiceSession(tenantId, agentId);
 
-  const [voiceStatus, setVoiceStatus] = React.useState<
-    "idle" | "preparing" | "ready" | "error"
-  >("idle");
   const [voiceError, setVoiceError] = React.useState<string | null>(null);
   const [voiceWarning, setVoiceWarning] = React.useState<string | null>(null);
-  const [voiceReady, setVoiceReady] = React.useState(false);
+  const [voiceSession, setVoiceSession] = React.useState<{
+    sessionId: string;
+    sessionToken: string;
+    wsUrl: string;
+    sttClientConfig: ScribeClientConnectConfig;
+  } | null>(null);
 
   const draftPayload = isDirty && draft ? draft : undefined;
-
-  const fetchVoiceSignedUrl = React.useCallback(async () => {
-    const result = await getAgentTestSignedUrl(tenantId, agentId, draftPayload);
-    if (result.voiceWarning) {
-      setVoiceWarning(result.voiceWarning);
-    }
-    return result.signedUrl;
-  }, [tenantId, agentId, draftPayload]);
 
   React.useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -149,13 +147,12 @@ export function AgentTestPanel({
     setChatError(null);
   };
 
-  const prepareVoice = async () => {
+  const startVoiceTest = async () => {
     setVoiceError(null);
     setVoiceWarning(null);
-    setVoiceStatus("preparing");
-    setVoiceReady(false);
+    setVoiceSession(null);
     try {
-      const result = await postAgentTestSync(tenantId, agentId, {
+      const result = await voiceSessionMutation.mutateAsync({
         draft: draftPayload,
       });
       if (result.voiceWarning) {
@@ -165,15 +162,22 @@ export function AgentTestPanel({
         setVoiceWarning(
           (prev) =>
             prev ??
-            "No ElevenLabs voice is configured for this agent. Pick a voice on the Voice tab, save, and prepare again.",
+            "No ElevenLabs voice is configured for this agent. Pick a voice on the Voice tab, save, and try again.",
         );
       }
-      setVoiceReady(true);
-      setVoiceStatus("ready");
+      setVoiceSession({
+        sessionId: result.sessionId,
+        sessionToken: result.token,
+        wsUrl: result.wsUrl,
+        sttClientConfig: result.sttClientConfig,
+      });
     } catch (e) {
-      setVoiceStatus("error");
       setVoiceError(errorMessage(e));
     }
+  };
+
+  const endVoiceTest = () => {
+    setVoiceSession(null);
   };
 
   return (
@@ -250,7 +254,8 @@ export function AgentTestPanel({
                 Send a message to test how this agent responds.{" "}
                 {savedGreeting
                   ? "Or play the configured greeting first."
-                  : "No greeting is configured yet."}
+                  : "No greeting is configured yet."}{" "}
+                Replies use the same short phone-call style as live calls.
               </p>
             ) : null}
             {messages.map((m) => (
@@ -321,36 +326,45 @@ export function AgentTestPanel({
               Voice test
             </h3>
             <p className="mt-1 text-sm text-slate-600">
-              Uses ElevenLabs Conversational AI (same stack as live calls,
-              without Twilio). Prepare syncs your prompt and voice, then start a
-              mic session in the browser.
+              Browser STT streams your microphone directly to ElevenLabs Scribe.
+              Agent replies use OpenAI and ElevenLabs TTS via the voice worker (
+              <code className="text-xs">npm run worker</code>) or{" "}
+              <code className="text-xs">start:prod</code> with media-stream
+              proxy enabled.
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline" className="border-slate-200">
-              Status: {voiceStatus}
+          {voiceSession ? (
+            <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">
+              Session ready
             </Badge>
-            {voiceReady ? (
-              <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">
-                Ready for call
-              </Badge>
-            ) : null}
-          </div>
+          ) : null}
 
-          <Button
-            type="button"
-            className="bg-indigo-600 hover:bg-indigo-700"
-            disabled={voiceStatus === "preparing"}
-            onClick={() => void prepareVoice()}
-          >
-            {voiceStatus === "preparing" ? (
-              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-            ) : (
-              <Radio className="mr-1.5 h-4 w-4" />
-            )}
-            Prepare voice agent
-          </Button>
+          {!voiceSession ? (
+            <Button
+              type="button"
+              className="bg-indigo-600 hover:bg-indigo-700"
+              disabled={voiceSessionMutation.isPending}
+              onClick={() => void startVoiceTest()}
+            >
+              {voiceSessionMutation.isPending ? (
+                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+              ) : (
+                <Mic className="mr-1.5 h-4 w-4" />
+              )}
+              {voiceSessionMutation.isPending
+                ? "Preparing…"
+                : "Prepare voice test"}
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={endVoiceTest}
+            >
+              Reset session
+            </Button>
+          )}
 
           {voiceWarning ? (
             <p className="text-sm text-amber-800" role="status">
@@ -364,8 +378,16 @@ export function AgentTestPanel({
             </p>
           ) : null}
 
-          {voiceReady ? (
-            <ElevenLabsVoiceCall fetchSignedUrl={fetchVoiceSignedUrl} />
+          {voiceSession ? (
+            <ProductionVoiceCall
+              tenantId={tenantId}
+              agentId={agentId}
+              wsUrl={voiceSession.wsUrl}
+              sessionId={voiceSession.sessionId}
+              sessionToken={voiceSession.sessionToken}
+              sttClientConfig={voiceSession.sttClientConfig}
+              onEnded={endVoiceTest}
+            />
           ) : null}
         </div>
       )}

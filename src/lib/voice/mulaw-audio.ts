@@ -24,6 +24,36 @@ export function decodeMulawBase64(base64: string): Buffer {
   return decodeMulawBuffer(Buffer.from(base64, "base64"));
 }
 
+/** ITU-T G.711 μ-law encode (16-bit PCM sample → 8-bit μ-law). */
+export function encodeMulawSample(sample: number): number {
+  const BIAS = 0x84;
+  const CLIP = 32635;
+  let s = Math.max(-CLIP, Math.min(CLIP, sample));
+  const sign = s < 0 ? 0x80 : 0;
+  if (s < 0) s = -s;
+  s += BIAS;
+  let exponent = 7;
+  for (
+    let expMask = 0x4000;
+    (s & expMask) === 0 && exponent > 0;
+    exponent--, expMask >>= 1
+  ) {
+    // shrink exponent until mantissa fits
+  }
+  const mantissa = (s >> (exponent + 3)) & 0x0f;
+  return ~(sign | (exponent << 4) | mantissa) & 0xff;
+}
+
+/** Encodes 16-bit little-endian PCM buffer to μ-law bytes. */
+export function encodeMulawBuffer(pcm: Buffer): Buffer {
+  const samples = pcm.length / 2;
+  const mulaw = Buffer.allocUnsafe(samples);
+  for (let i = 0; i < samples; i++) {
+    mulaw[i] = encodeMulawSample(pcm.readInt16LE(i * 2));
+  }
+  return mulaw;
+}
+
 /** Wraps 16-bit mono PCM as a WAV file (8 kHz telephony). */
 export function pcm16ToWav(pcm: Buffer, sampleRate = 8000): Buffer {
   const header = Buffer.alloc(44);

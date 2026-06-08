@@ -6,6 +6,8 @@ export type PortalElevenLabsVoice = {
   name: string;
   category: string;
   description: string | null;
+  /** From ElevenLabs voice labels, e.g. female / male / neutral */
+  gender: string | null;
 };
 
 /**
@@ -33,11 +35,18 @@ export async function listPortalElevenLabsVoices(): Promise<{
         (v as unknown as { voice_id?: string }).voice_id ??
         "";
       if (!voiceId) continue;
+      const rawLabels = (v as { labels?: Record<string, string> }).labels;
+      const gender =
+        rawLabels && typeof rawLabels.gender === "string"
+          ? rawLabels.gender.trim().toLowerCase()
+          : null;
+
       voices.push({
         voiceId,
         name: (v.name && v.name.trim()) || voiceId,
         category: v.category != null ? String(v.category) : "",
         description: v.description ?? null,
+        gender: gender || null,
       });
     }
 

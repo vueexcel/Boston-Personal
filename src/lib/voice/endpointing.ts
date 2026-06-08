@@ -103,14 +103,17 @@ export function shouldTriggerBargeIn(
   config: VoiceTuningConfig,
 ): boolean {
   const text = event.text.trim();
-  if (text.length < config.bargeInMinChars) return false;
+  const partialMin = Math.min(
+    config.bargeInMinChars,
+    CLIENT_PARTIAL_BARGE_IN_MIN_CHARS,
+  );
 
-  if (config.bargeInOnlyFinal) {
-    return event.final;
+  if (event.final) {
+    return text.length >= config.bargeInMinChars;
   }
 
-  if (event.final) return true;
-  return false;
+  // Substantive partials interrupt agent playback on PSTN (mirrors browser client barge-in).
+  return text.length >= partialMin;
 }
 
 /** Prefer longer / newer utterance when queueing during overlap. */
@@ -124,7 +127,7 @@ export function coalescePendingTranscript(
   if (next === prev) return prev;
   if (next.includes(prev)) return next;
   if (prev.includes(next)) return prev;
-  return next;
+  return `${prev} ${next}`;
 }
 
 export function lastUserMessageContent(
@@ -137,4 +140,33 @@ export function lastUserMessageContent(
     }
   }
   return null;
+}
+
+export function lastAssistantMessageContent(
+  messages: { role: string; content: string }[],
+): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role === "assistant" && m.content.trim()) {
+      return m.content.trim();
+    }
+  }
+  return null;
+}
+
+export const CLIENT_PARTIAL_BARGE_IN_MIN_CHARS = 8;
+
+/** Client-signaled or partial barge-in (browser echo-filtered). */
+export function shouldTriggerClientBargeIn(
+  event: CallerSpeechEvent & { bargeIn?: boolean },
+  config: VoiceTuningConfig,
+): boolean {
+  const text = event.text.trim();
+  const minChars = event.bargeIn
+    ? Math.min(config.bargeInMinChars, CLIENT_PARTIAL_BARGE_IN_MIN_CHARS)
+    : config.bargeInMinChars;
+  if (text.length < minChars) return false;
+  if (event.bargeIn) return true;
+  if (config.bargeInOnlyFinal) return event.final;
+  return true;
 }

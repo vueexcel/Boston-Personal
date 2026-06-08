@@ -1,6 +1,8 @@
 import { getElevenLabsClient } from "@/lib/integrations/elevenlabs";
+import { toElevenLabsTtsLanguageCode } from "@/lib/integrations/elevenlabs-flash-v25-languages";
 import { getServerEnv } from "@/lib/env/server";
 import { resolveConvaiTtsVoiceId } from "@/lib/services/elevenlabs-voice-resolve";
+import { getElevenLabsTtsModel } from "@/lib/voice/voice-tuning";
 
 const PREVIEW_TEXT =
   "Hi — this is a quick sample so you can hear how this voice sounds for your agent.";
@@ -14,6 +16,7 @@ export type ElevenLabsPreviewResult =
  */
 export async function synthesizePortalVoicePreview(
   voiceId: string,
+  language?: string | null,
 ): Promise<ElevenLabsPreviewResult> {
   const env = getServerEnv();
   if (!env.ELEVENLABS_API_KEY?.trim()) {
@@ -40,7 +43,8 @@ export async function synthesizePortalVoicePreview(
     const client = getElevenLabsClient();
     const stream = await client.textToSpeech.convert(ttsVoiceId, {
       text: PREVIEW_TEXT,
-      modelId: "eleven_multilingual_v2",
+      modelId: getElevenLabsTtsModel(),
+      languageCode: toElevenLabsTtsLanguageCode(language),
       outputFormat: "mp3_44100_128",
     });
     const body = Buffer.from(await new Response(stream).arrayBuffer());

@@ -21,8 +21,12 @@ export async function listElevenLabsVoices(
 export async function previewElevenLabsVoice(
   tenantId: string,
   voiceId: string,
+  language?: string | null,
 ): Promise<Blob> {
-  return apiPostBlob(tenantElevenLabsPath(tenantId, "preview"), { voiceId });
+  return apiPostBlob(tenantElevenLabsPath(tenantId, "preview"), {
+    voiceId,
+    ...(language != null && language !== "" ? { language } : {}),
+  });
 }
 
 export type CreateCustomVoiceResult = {

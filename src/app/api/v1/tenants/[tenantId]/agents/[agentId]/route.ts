@@ -6,6 +6,7 @@ import {
   softDeleteAgentForTenant,
   updateAgentForTenant,
 } from "@/lib/services/agents";
+import { ContentSafetyViolationError } from "@/lib/services/prompt-content-safety";
 import { updateAgentBodySchema } from "@/lib/validation/agents-update";
 import { tenantIdSchema } from "@/lib/validation/tenant-id";
 import { uuidSchema } from "@/lib/db/schema";
@@ -103,19 +104,28 @@ export async function PATCH(
   }
 
   try {
-    await updateAgentForTenant(tenantId, agentId, parsedBody.data);
-    const agent = await getAgentForTenant(tenantId, agentId);
-    if (!agent) {
+    const { agent, warnings } = await updateAgentForTenant(
+      tenantId,
+      agentId,
+      parsedBody.data,
+    );
+    return jsonEnvelope(
+      okEnvelope({
+        agent,
+        warnings: warnings.length > 0 ? warnings : undefined,
+      }),
+    );
+  } catch (e) {
+    if (e instanceof ContentSafetyViolationError) {
       return jsonEnvelope(
         errEnvelope({
-          code: "DATASTORE_ERROR",
-          message: "Update succeeded but could not reload agent",
+          code: e.code,
+          message: e.message,
+          details: { issues: e.issues },
         }),
-        { status: 503 },
+        { status: 400 },
       );
     }
-    return jsonEnvelope(okEnvelope({ agent }));
-  } catch (e) {
     const err = e as Error & { code?: string };
     if (err.code === "AGENT_NOT_FOUND" || err.message === "AGENT_NOT_FOUND") {
       return jsonEnvelope(

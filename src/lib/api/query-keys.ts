@@ -3,8 +3,11 @@ export const queryKeys = {
     all: (tenantId: string) => ["agents", tenantId] as const,
     detail: (tenantId: string, agentId: string) =>
       ["agents", tenantId, agentId] as const,
-    testSignedUrl: (tenantId: string, agentId: string) =>
-      ["agents", tenantId, agentId, "test-signed-url"] as const,
+    promptPreview: (
+      tenantId: string,
+      agentId: string,
+      draft: unknown,
+    ) => ["agents", tenantId, agentId, "prompt-preview", draft] as const,
   },
   elevenlabs: {
     voices: (tenantId: string) => ["elevenlabs", "voices", tenantId] as const,

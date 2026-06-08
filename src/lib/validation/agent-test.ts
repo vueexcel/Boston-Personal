@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { agentStatusSchema } from "@/lib/db/schema";
+import { agentLanguageSchema } from "@/lib/validation/agent-language";
 import {
   AGENT_CONFIG_VERSION,
   AGENT_RESPONSIBILITY_IDS,
@@ -26,7 +27,7 @@ export const agentTestDraftSchema = z.object({
   status: agentStatusSchema.optional(),
   voiceId: z.string().max(512).nullable().optional(),
   voiceProviderId: z.string().max(128).nullable().optional(),
-  language: z.string().min(2).max(64).nullable().optional(),
+  language: agentLanguageSchema,
   portalConfig: agentTestPortalConfigSchema,
 });
 

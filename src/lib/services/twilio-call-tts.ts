@@ -1,4 +1,5 @@
 import { getElevenLabsClient } from "@/lib/integrations/elevenlabs";
+import { toElevenLabsTtsLanguageCode } from "@/lib/integrations/elevenlabs-flash-v25-languages";
 import { getServerEnv } from "@/lib/env/server";
 import {
   getElevenLabsTtsModel,
@@ -13,13 +14,14 @@ const CHUNK_SIZE_BYTES = 640;
 export async function synthesizeCallSpeechMulaw(
   text: string,
   voiceId: string,
+  language?: string | null,
   signal?: AbortSignal,
 ): Promise<Buffer> {
   const chunks: Buffer[] = [];
   await streamCallSpeechMulaw(text, voiceId, (chunk) => {
     if (signal?.aborted) return;
     chunks.push(chunk);
-  }, signal);
+  }, language, signal);
   return Buffer.concat(chunks);
 }
 
@@ -30,6 +32,7 @@ export async function streamCallSpeechMulaw(
   text: string,
   voiceId: string,
   onChunk: (mulaw: Buffer) => void | Promise<void>,
+  language?: string | null,
   signal?: AbortSignal,
 ): Promise<void> {
   const env = getServerEnv();
@@ -49,6 +52,7 @@ export async function streamCallSpeechMulaw(
   const body = await client.textToSpeech.convert(voiceId, {
     text: trimmed,
     modelId: getElevenLabsTtsModel(),
+    languageCode: toElevenLabsTtsLanguageCode(language),
     outputFormat: "ulaw_8000",
     voiceSettings: {
       speed,
