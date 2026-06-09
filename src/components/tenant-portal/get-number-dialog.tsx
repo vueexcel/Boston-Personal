@@ -30,6 +30,8 @@ import { formatPhoneNumberDisplay } from "@/lib/utils/phone-format";
 import { ApiClientError } from "@/lib/api/http";
 import { cn } from "@/lib/utils";
 
+const DEFAULT_NUMBER_TYPES: AvailablePhoneNumberType[] = ["local"];
+
 type GetNumberDialogProps = {
   tenantId: string;
   open: boolean;
@@ -108,7 +110,10 @@ export function GetNumberDialog({
     [countries, country],
   );
 
-  const availableTypes = selectedCountryMeta?.numberTypes ?? ["local"];
+  const availableTypes = React.useMemo(
+    () => selectedCountryMeta?.numberTypes ?? DEFAULT_NUMBER_TYPES,
+    [selectedCountryMeta?.numberTypes],
+  );
 
   React.useEffect(() => {
     if (!open || countries.length === 0) return;

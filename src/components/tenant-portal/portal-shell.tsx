@@ -10,9 +10,7 @@ import { cn } from "@/lib/utils";
 
 type PortalShellProps = {
   children: React.ReactNode;
-  tenantDisplayId: string;
-  /** Shown under the tenant id in the top bar when set. */
-  accountName?: string;
+  accountName: string;
   accountStatus: TenantPortalAccountStatus;
 };
 
@@ -21,7 +19,6 @@ type PortalShellProps = {
  */
 export function PortalShell({
   children,
-  tenantDisplayId,
   accountName,
   accountStatus,
 }: PortalShellProps) {
@@ -37,10 +34,25 @@ export function PortalShell({
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
+  React.useEffect(() => {
+    const html = document.documentElement;
+    const prevHtmlOverflow = html.style.overflow;
+    const prevBodyOverflow = document.body.style.overflow;
+    html.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+    return () => {
+      html.style.overflow = prevHtmlOverflow;
+      document.body.style.overflow = prevBodyOverflow;
+    };
+  }, []);
+
   return (
-    <div className="flex min-h-screen bg-slate-50/90">
-      {/* Desktop sidebar */}
-      <aside className="hidden w-64 shrink-0 border-r border-slate-200/90 bg-white shadow-sm md:flex md:flex-col">
+    <div
+      data-portal-shell
+      className="fixed inset-0 flex overflow-hidden bg-slate-50/90"
+    >
+      {/* Desktop sidebar — full viewport height; nav scrolls inside if needed */}
+      <aside className="hidden h-full w-64 shrink-0 border-r border-slate-200/90 bg-white shadow-sm md:flex md:flex-col">
         <TenantSidebar />
       </aside>
 
@@ -57,11 +69,11 @@ export function PortalShell({
       {/* Mobile drawer */}
       <div
         className={cn(
-          "fixed inset-y-0 left-0 z-50 w-[min(18rem,100vw-2rem)] border-r border-slate-200/90 bg-white shadow-2xl transition-transform duration-200 ease-out md:hidden",
+          "fixed inset-y-0 left-0 z-50 flex w-[min(18rem,100vw-2rem)] flex-col border-r border-slate-200/90 bg-white shadow-2xl transition-transform duration-200 ease-out md:hidden",
           mobileOpen ? "translate-x-0" : "-translate-x-full",
         )}
       >
-        <div className="flex justify-end border-b border-slate-100 p-2">
+        <div className="flex shrink-0 justify-end border-b border-slate-100 p-2">
           <Button
             type="button"
             variant="ghost"
@@ -73,12 +85,14 @@ export function PortalShell({
             <X className="h-5 w-5" />
           </Button>
         </div>
-        <TenantSidebar onNavigate={() => setMobileOpen(false)} />
+        <TenantSidebar
+          className="min-h-0 flex-1"
+          onNavigate={() => setMobileOpen(false)}
+        />
       </div>
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <TenantTopBar
-          tenantDisplayId={tenantDisplayId}
           accountName={accountName}
           accountStatus={accountStatus}
           mobileMenuTrigger={
@@ -94,7 +108,7 @@ export function PortalShell({
             </Button>
           }
         />
-        <main className="flex-1 overflow-x-hidden px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        <main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           <div className="mx-auto w-full max-w-7xl">{children}</div>
         </main>
       </div>

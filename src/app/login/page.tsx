@@ -1,23 +1,18 @@
-import { Suspense } from "react";
-import Link from "next/link";
-import { LoginForm } from "@/components/auth/login-form";
+import { redirect } from "next/navigation";
+import { loginUrl } from "@/lib/auth/routes";
 
-export const metadata = { title: "Sign in" };
+type LoginRedirectPageProps = {
+  searchParams: Record<string, string | string[] | undefined>;
+};
 
-export default function LoginPage() {
-  return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-6 bg-slate-50/90 px-4 py-12">
-      <Link
-        href="/"
-        className="text-sm text-slate-600 transition-colors hover:text-slate-900"
-      >
-        ← Home
-      </Link>
-      <Suspense
-        fallback={<p className="text-sm text-slate-600">Loading form…</p>}
-      >
-        <LoginForm />
-      </Suspense>
-    </main>
-  );
+/** Legacy `/login` — preserve query params on canonical root sign-in URL. */
+export default function LoginRedirectPage({
+  searchParams,
+}: LoginRedirectPageProps) {
+  const params: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(searchParams)) {
+    if (typeof value === "string") params[key] = value;
+    else if (Array.isArray(value) && value[0]) params[key] = value[0];
+  }
+  redirect(loginUrl(params));
 }

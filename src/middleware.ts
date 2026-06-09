@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE } from "@/lib/auth/session-constants";
+import { LOGIN_PATH } from "@/lib/auth/routes";
 
 /** Public origin for redirects behind Caddy + server.prod internal proxy. */
 function getPublicOrigin(request: NextRequest): string {
@@ -29,9 +30,10 @@ export async function middleware(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
   const loggedIn = hasSessionCookie(request);
+  const origin = getPublicOrigin(request);
 
   if (pathname.startsWith("/portal") && !loggedIn) {
-    const redirectUrl = new URL("/login", getPublicOrigin(request));
+    const redirectUrl = new URL(LOGIN_PATH, origin);
     redirectUrl.searchParams.set(
       "redirect",
       `${pathname}${request.nextUrl.search}`,
@@ -39,13 +41,14 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  if ((pathname === "/login" || pathname === "/signup") && loggedIn) {
-    return NextResponse.redirect(new URL("/portal", getPublicOrigin(request)));
+  const authEntryPaths = new Set([LOGIN_PATH, "/login", "/signup"]);
+  if (authEntryPaths.has(pathname) && loggedIn) {
+    return NextResponse.redirect(new URL("/portal", origin));
   }
 
   return response;
 }
 
 export const config = {
-  matcher: ["/portal/:path*", "/login", "/signup"],
+  matcher: ["/portal/:path*", "/", "/login", "/signup"],
 };

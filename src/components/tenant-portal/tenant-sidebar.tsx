@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { BostelLogo } from "@/components/brand/bostel-logo";
 import { cn } from "@/lib/utils";
 import { PORTAL_NAV_ITEMS } from "@/components/tenant-portal/portal-nav";
 
@@ -17,17 +18,14 @@ export function TenantSidebar({ onNavigate, className }: TenantSidebarProps) {
   const pathname = usePathname();
 
   return (
-    <div className={cn("flex h-full flex-col", className)}>
+    <div className={cn("flex h-full min-h-0 flex-col", className)}>
       <div className="flex h-16 shrink-0 items-center border-b border-slate-200/90 px-6">
         <Link
           href="/portal"
-          className="flex items-center gap-2 font-semibold tracking-tight text-slate-900"
+          className="flex items-center gap-2.5 font-semibold tracking-tight text-slate-900"
           onClick={onNavigate}
         >
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-xs font-bold text-white shadow-sm">
-            B
-          </span>
-          <span className="text-sm sm:text-base">Bostel Voice AI</span>
+          <BostelLogo size="sm" framed />
         </Link>
       </div>
       <nav className="flex-1 space-y-0.5 overflow-y-auto p-3" aria-label="Main">
@@ -60,10 +58,10 @@ export function TenantSidebar({ onNavigate, className }: TenantSidebarProps) {
           );
         })}
       </nav>
-      <div className="border-t border-slate-200/90 p-4 space-y-3">
+      <div className="shrink-0 border-t border-slate-200/90 p-4 space-y-3">
         <a
           href="/auth/sign-out"
-          className="block text-sm font-medium text-slate-700 underline-offset-4 hover:text-slate-900 hover:underline"
+          className="flex w-full items-center justify-center rounded-lg border border-slate-200/90 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 hover:text-slate-900"
         >
           Sign out
         </a>

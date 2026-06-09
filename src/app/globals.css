@@ -63,4 +63,11 @@
   .text-balance {
     text-wrap: balance;
   }
+
+  .auth-brand-panel {
+    background:
+      radial-gradient(ellipse 80% 60% at 20% 10%, hsl(239 84% 58% / 0.45), transparent),
+      radial-gradient(ellipse 60% 50% at 80% 90%, hsl(262 83% 58% / 0.25), transparent),
+      linear-gradient(165deg, hsl(222 47% 11%) 0%, hsl(230 45% 14%) 45%, hsl(239 50% 18%) 100%);
+  }
 }

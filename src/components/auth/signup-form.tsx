@@ -2,7 +2,9 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -13,6 +15,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { LOGIN_PATH } from "@/lib/auth/routes";
 
 export function SignupForm() {
   const router = useRouter();
@@ -21,12 +24,10 @@ export function SignupForm() {
   const [password, setPassword] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [info, setInfo] = React.useState<string | null>(null);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    setInfo(null);
     setSubmitting(true);
     try {
       const res = await fetch("/api/auth/signup", {
@@ -47,35 +48,36 @@ export function SignupForm() {
       }
       router.push("/portal");
       router.refresh();
-      return;
     } catch {
-      setError("Something went wrong.");
+      setError("Something went wrong. Please try again.");
       setSubmitting(false);
     }
   };
 
   return (
-    <Card className="w-full max-w-md border-slate-200 shadow-sm">
-      <CardHeader className="space-y-1">
-        <CardTitle className="text-2xl font-semibold tracking-tight">
+    <Card className="border-border/60 bg-card/80 shadow-[0_8px_30px_rgb(0,0,0,0.04)] backdrop-blur-sm">
+      <CardHeader className="space-y-1 pb-2">
+        <CardTitle className="text-xl font-semibold tracking-tight">
           Create your workspace
         </CardTitle>
         <CardDescription>
-          We will create an organization for you and link it to this account.
+          We&apos;ll set up your organization and sign you in automatically.
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <form className="space-y-4" onSubmit={(e) => void onSubmit(e)}>
+        <form className="space-y-5" onSubmit={(e) => void onSubmit(e)}>
           <div className="space-y-2">
             <Label htmlFor="signup-org">Organization name</Label>
             <Input
               id="signup-org"
               type="text"
               autoComplete="organization"
+              required
+              autoFocus
               placeholder="e.g. Acme Plumbing"
               value={accountName}
               onChange={(e) => setAccountName(e.target.value)}
-              className="border-slate-200"
+              className="h-10 bg-background/50"
             />
           </div>
           <div className="space-y-2">
@@ -85,9 +87,10 @@ export function SignupForm() {
               type="email"
               autoComplete="email"
               required
+              placeholder="you@company.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="border-slate-200"
+              className="h-10 bg-background/50"
             />
           </div>
           <div className="space-y-2">
@@ -98,34 +101,32 @@ export function SignupForm() {
               autoComplete="new-password"
               required
               minLength={8}
+              placeholder="At least 8 characters"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="border-slate-200"
+              className="h-10 bg-background/50"
             />
-            <p className="text-xs text-slate-500">At least 8 characters.</p>
           </div>
           {error ? (
-            <p className="text-sm text-red-600" role="alert">
-              {error}
-            </p>
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
           ) : null}
-          {info ? (
-            <p className="text-sm text-slate-700" role="status">
-              {info}
-            </p>
-          ) : null}
-          <Button
-            type="submit"
-            className="w-full bg-indigo-600 hover:bg-indigo-700"
-            disabled={submitting}
-          >
-            {submitting ? "Creating account…" : "Sign up"}
+          <Button type="submit" className="h-10 w-full" disabled={submitting}>
+            {submitting ? (
+              <>
+                <Loader2 className="animate-spin" aria-hidden />
+                Creating account…
+              </>
+            ) : (
+              "Create account"
+            )}
           </Button>
-          <p className="text-center text-sm text-slate-600">
+          <p className="text-center text-sm text-muted-foreground">
             Already have an account?{" "}
             <Link
-              href="/login"
-              className="font-medium text-indigo-600 hover:text-indigo-700"
+              href={LOGIN_PATH}
+              className="font-medium text-primary underline-offset-4 transition-colors hover:underline"
             >
               Sign in
             </Link>

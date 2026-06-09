@@ -18,7 +18,6 @@ import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardFooter,
   CardHeader,
   CardTitle,
@@ -289,7 +288,10 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
     null,
   );
   const [phoneAssigning, setPhoneAssigning] = React.useState(false);
-  const elevenVoices = voicesData?.voices ?? [];
+  const elevenVoices = React.useMemo(
+    () => voicesData?.voices ?? [],
+    [voicesData?.voices],
+  );
   const elevenVoicesError = voicesQueryError
     ? voicesQueryError instanceof ApiClientError
       ? voicesQueryError.message
@@ -793,8 +795,11 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
             language,
           },
         });
-      const { created, agent: updatedAgentRow, warnings: voiceWarnings } =
-        voiceApplyResult;
+      const {
+        created,
+        agent: updatedAgentRow,
+        warnings: voiceWarnings,
+      } = voiceApplyResult;
       setVoiceId(created.voiceId);
       setSaveError(null);
       applyAgentToLocalState({
@@ -826,18 +831,19 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
     setSaveWarnings([]);
     const roleDescription = serializeAgentPortalConfig(portalConfig);
     try {
-      const { agent: updated, warnings } = await updateAgentMutation.mutateAsync({
-        agentId: agent.id,
-        body: {
-          name: agentName.trim(),
-          status,
-          greeting: greeting.trim() || null,
-          roleDescription,
-          voiceId: selectedVoiceId || null,
-          voiceProviderId: selectedVoiceId ? "elevenlabs" : null,
-          language,
-        },
-      });
+      const { agent: updated, warnings } =
+        await updateAgentMutation.mutateAsync({
+          agentId: agent.id,
+          body: {
+            name: agentName.trim(),
+            status,
+            greeting: greeting.trim() || null,
+            roleDescription,
+            voiceId: selectedVoiceId || null,
+            voiceProviderId: selectedVoiceId ? "elevenlabs" : null,
+            language,
+          },
+        });
       setSaveMessage("Saved.");
       if (warnings?.length) {
         setSaveWarnings(warnings);
@@ -845,13 +851,14 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
       applyAgentToLocalState(updated);
       router.refresh();
     } catch (e) {
-      if (e instanceof ApiClientError && e.code === "CONTENT_SAFETY_VIOLATION") {
+      if (
+        e instanceof ApiClientError &&
+        e.code === "CONTENT_SAFETY_VIOLATION"
+      ) {
         const issues =
           (e.details as { issues?: SafetyIssue[] } | undefined)?.issues ?? [];
         setSaveError(
-          issues.length > 0
-            ? formatSafetyIssues(issues)
-            : e.message,
+          issues.length > 0 ? formatSafetyIssues(issues) : e.message,
         );
         if (issues.some((i) => i.field?.includes("knowledge"))) {
           setActiveTab("knowledge");
@@ -874,14 +881,7 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
       language,
       portalConfig,
     }),
-    [
-      agentName,
-      greeting,
-      status,
-      selectedVoiceId,
-      language,
-      portalConfig,
-    ],
+    [agentName, greeting, status, selectedVoiceId, language, portalConfig],
   );
 
   const testDraft = React.useMemo((): AgentTestDraft | null => {
@@ -929,19 +929,6 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
           <CardTitle className="text-xl text-slate-900">
             Agent configuration
           </CardTitle>
-          <CardDescription className="text-slate-600">
-            Tabs match your reference layout (no separate &quot;Actions&quot;
-            tab). Behavior + Knowledge fields that persist are saved with the{" "}
-            <strong>floating Save changes</strong> bar into{" "}
-            <span className="font-mono text-xs">greeting</span>,{" "}
-            <span className="font-mono text-xs">voice_id</span>,{" "}
-            <span className="font-mono text-xs">name</span>,{" "}
-            <span className="font-mono text-xs">status</span>, and a versioned
-            JSON blob in{" "}
-            <span className="font-mono text-xs">role_description</span>. Call
-            Forwarding, Advanced LLM controls, and raw prompt unlock are UI-only
-            until APIs or DB columns exist.
-          </CardDescription>
         </CardHeader>
         <CardContent className="pt-0">
           {saveWarnings.length > 0 ? (
@@ -1412,8 +1399,7 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
                       </Select>
                       {phoneNumbers.some(
                         (p) =>
-                          p.assignedAgentId &&
-                          p.assignedAgentId !== agent.id,
+                          p.assignedAgentId && p.assignedAgentId !== agent.id,
                       ) ? (
                         <p className="text-xs text-slate-500">
                           Selecting a number already used by another agent will
@@ -1650,7 +1636,9 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
                 "Server-generated preview including platform rules, attached knowledge base documents, and guardrails. Unlock for manual control is not available yet. ElevenLabs browser tests run on ElevenLabs servers — caller speech is screened by the hardened prompt, not by our runtime filter.",
                 <>
                   {promptPreviewQuery.isPending && !systemPromptPreview ? (
-                    <p className="text-sm text-slate-500">Loading prompt preview…</p>
+                    <p className="text-sm text-slate-500">
+                      Loading prompt preview…
+                    </p>
                   ) : null}
                   {promptPreviewQuery.isError ? (
                     <p className="text-sm text-red-600" role="alert">

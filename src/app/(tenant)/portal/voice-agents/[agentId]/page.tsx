@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 import { VoiceAgentBuilder } from "@/components/tenant-portal/voice-agent-builder";
 import { Button } from "@/components/ui/button";
 import { getPortalTenantContext } from "@/lib/auth/portal-context";
+import { loginUrl } from "@/lib/auth/routes";
 import { getAgentForTenant } from "@/lib/services/agents";
 
 type PageProps = {
@@ -20,13 +21,13 @@ export async function generateMetadata({
   if (!ctx) return { title: "Agent" };
   const agent = await getAgentForTenant(ctx.tenantId, params.agentId);
   if (!agent) return { title: "Agent" };
-  return { title: `${agent.name} · Voice agent` };
+  return { title: `${agent.name} · Bostel VoiceAI Agent` };
 }
 
 export default async function VoiceAgentEditPage({ params }: PageProps) {
   const ctx = await getPortalTenantContext();
   if (!ctx) {
-    redirect(`/login?redirect=/portal/voice-agents/${params.agentId}`);
+    redirect(loginUrl({ redirect: `/portal/voice-agents/${params.agentId}` }));
   }
 
   const agent = await getAgentForTenant(ctx.tenantId, params.agentId);
@@ -41,12 +42,6 @@ export default async function VoiceAgentEditPage({ params }: PageProps) {
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
             Configure agent
           </h1>
-          <p className="mt-1 max-w-2xl text-sm text-slate-600 sm:text-base">
-            URL:{" "}
-            <span className="font-mono text-xs text-slate-700 sm:text-sm">
-              /portal/voice-agents/{agent.id}
-            </span>
-          </p>
         </div>
         <Button variant="outline" size="sm" asChild>
           <Link href="/portal/voice-agents">All agents</Link>

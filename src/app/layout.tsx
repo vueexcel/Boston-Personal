@@ -11,10 +11,14 @@ const appUrl =
 export const metadata: Metadata = {
   metadataBase: new URL(appUrl),
   title: {
-    default: "Bostel Voice AI",
-    template: "%s · Bostel Voice AI",
+    default: "Bostel.Voice.AI",
+    template: "%s - Bostel.Voice.AI",
   },
   description: "Multi-tenant Voice AI platform",
+  icons: {
+    icon: [{ url: "/brand-icon.png", type: "image/png" }],
+    apple: [{ url: "/brand-icon.png", type: "image/png" }],
+  },
 };
 
 export default function RootLayout({

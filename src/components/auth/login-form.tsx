@@ -2,7 +2,9 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { Loader2 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -13,14 +15,11 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-
 type LoginFormProps = {
   defaultRedirect?: string;
 };
 
-export function LoginForm({
-  defaultRedirect = "/portal",
-}: LoginFormProps) {
+export function LoginForm({ defaultRedirect = "/portal" }: LoginFormProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get("redirect") ?? defaultRedirect;
@@ -57,23 +56,23 @@ export function LoginForm({
       router.push(redirectTo.startsWith("/") ? redirectTo : "/portal");
       router.refresh();
     } catch {
-      setError("Something went wrong.");
+      setError("Something went wrong. Please try again.");
       setSubmitting(false);
     }
   };
 
   return (
-    <Card className="w-full max-w-md border-slate-200 shadow-sm">
-      <CardHeader className="space-y-1">
-        <CardTitle className="text-2xl font-semibold tracking-tight">
-          Sign in
+    <Card className="border-border/60 bg-card/80 shadow-[0_8px_30px_rgb(0,0,0,0.04)] backdrop-blur-sm">
+      <CardHeader className="space-y-1 pb-2">
+        <CardTitle className="text-xl font-semibold tracking-tight">
+          Welcome back
         </CardTitle>
         <CardDescription>
-          Use the email and password for your Bostel Voice AI workspace.
+          Enter your credentials to access your workspace.
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <form className="space-y-4" onSubmit={(e) => void onSubmit(e)}>
+        <form className="space-y-5" onSubmit={(e) => void onSubmit(e)}>
           <div className="space-y-2">
             <Label htmlFor="login-email">Email</Label>
             <Input
@@ -81,9 +80,11 @@ export function LoginForm({
               type="email"
               autoComplete="email"
               required
+              autoFocus
+              placeholder="you@company.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="border-slate-200"
+              className="h-10 bg-background/50"
             />
           </div>
           <div className="space-y-2">
@@ -93,28 +94,32 @@ export function LoginForm({
               type="password"
               autoComplete="current-password"
               required
+              placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="border-slate-200"
+              className="h-10 bg-background/50"
             />
           </div>
           {error ? (
-            <p className="text-sm text-red-600" role="alert">
-              {error}
-            </p>
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
           ) : null}
-          <Button
-            type="submit"
-            className="w-full bg-indigo-600 hover:bg-indigo-700"
-            disabled={submitting}
-          >
-            {submitting ? "Signing in…" : "Sign in"}
+          <Button type="submit" className="h-10 w-full" disabled={submitting}>
+            {submitting ? (
+              <>
+                <Loader2 className="animate-spin" aria-hidden />
+                Signing in…
+              </>
+            ) : (
+              "Sign in"
+            )}
           </Button>
-          <p className="text-center text-sm text-slate-600">
+          <p className="text-center text-sm text-muted-foreground">
             No account?{" "}
             <Link
               href="/signup"
-              className="font-medium text-indigo-600 hover:text-indigo-700"
+              className="font-medium text-primary underline-offset-4 transition-colors hover:underline"
             >
               Create one
             </Link>

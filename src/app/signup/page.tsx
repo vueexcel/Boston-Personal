@@ -1,18 +1,18 @@
-import Link from "next/link";
+import type { Metadata } from "next";
+import { AuthShell } from "@/components/auth/auth-shell";
 import { SignupForm } from "@/components/auth/signup-form";
 
-export const metadata = { title: "Sign up" };
+export const metadata: Metadata = {
+  title: "Sign up",
+};
 
 export default function SignupPage() {
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-6 bg-slate-50/90 px-4 py-12">
-      <Link
-        href="/"
-        className="text-sm text-slate-600 transition-colors hover:text-slate-900"
-      >
-        ← Home
-      </Link>
+    <AuthShell
+      title="Start your free workspace"
+      subtitle="Create an organization and deploy your first voice agent in minutes."
+    >
       <SignupForm />
-    </main>
+    </AuthShell>
   );
 }

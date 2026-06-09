@@ -204,7 +204,9 @@ export function AgentTestPanel({
           type="button"
           size="sm"
           variant={mode === "voice" ? "default" : "outline"}
-          className={mode === "voice" ? "bg-indigo-600 hover:bg-indigo-700" : ""}
+          className={
+            mode === "voice" ? "bg-indigo-600 hover:bg-indigo-700" : ""
+          }
           onClick={() => setMode("voice")}
         >
           <Mic className="mr-1.5 h-3.5 w-3.5" />
@@ -325,13 +327,6 @@ export function AgentTestPanel({
             <h3 className="text-base font-semibold text-slate-900">
               Voice test
             </h3>
-            <p className="mt-1 text-sm text-slate-600">
-              Browser STT streams your microphone directly to ElevenLabs Scribe.
-              Agent replies use OpenAI and ElevenLabs TTS via the voice worker (
-              <code className="text-xs">npm run worker</code>) or{" "}
-              <code className="text-xs">start:prod</code> with media-stream
-              proxy enabled.
-            </p>
           </div>
 
           {voiceSession ? (
@@ -357,11 +352,7 @@ export function AgentTestPanel({
                 : "Prepare voice test"}
             </Button>
           ) : (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={endVoiceTest}
-            >
+            <Button type="button" variant="outline" onClick={endVoiceTest}>
               Reset session
             </Button>
           )}

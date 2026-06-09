@@ -1,33 +1,33 @@
-import Link from "next/link";
-import { Button } from "@/components/ui/button";
+import { Suspense } from "react";
+import type { Metadata } from "next";
+import { AuthShell } from "@/components/auth/auth-shell";
+import { LoginForm } from "@/components/auth/login-form";
 
-export default function Home() {
+export const metadata: Metadata = {
+  title: "Sign in",
+};
+
+function LoginFormFallback() {
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center gap-6 p-8">
-      <div className="max-w-lg text-center space-y-2">
-        <h1 className="text-3xl font-semibold tracking-tight">Bostel Voice AI</h1>
-        <p className="text-muted-foreground text-sm">
-          Next.js 14 App Router stack with Supabase (Postgres), Redis, BullMQ, Twilio,
-          ElevenLabs, and OpenAI — tenant-isolated by design.
-        </p>
-      </div>
-      <div className="flex flex-wrap gap-3 justify-center">
-        <Button asChild>
-          <Link href="/signup">Sign up</Link>
-        </Button>
-        <Button variant="secondary" asChild>
-          <Link href="/login">Sign in</Link>
-        </Button>
-        <Button variant="outline" asChild>
-          <Link href="/api/health">GET /api/health</Link>
-        </Button>
-        <Button variant="outline" asChild>
-          <Link href="/portal">Customer portal</Link>
-        </Button>
-        <Button variant="outline" asChild>
-          <Link href="/admin/tenants">Platform admin — tenants</Link>
-        </Button>
-      </div>
-    </main>
+    <div
+      className="flex h-64 items-center justify-center rounded-xl border border-border/60 bg-card/50"
+      aria-busy="true"
+      aria-label="Loading sign in form"
+    >
+      <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+    </div>
+  );
+}
+
+export default function HomePage() {
+  return (
+    <AuthShell
+      title="Sign in to your workspace"
+      subtitle="Use the email and password for your Bostel Voice AI account."
+    >
+      <Suspense fallback={<LoginFormFallback />}>
+        <LoginForm />
+      </Suspense>
+    </AuthShell>
   );
 }
