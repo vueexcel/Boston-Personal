@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { getPublicOriginFromRequest } from "@/lib/auth/public-origin";
+import { LOGIN_PATH } from "@/lib/auth/routes";
 import {
   deleteSessionByToken,
   SESSION_COOKIE,
 } from "@/lib/auth/session";
-import { LOGIN_PATH } from "@/lib/auth/routes";
 
 async function signOutAndRedirect(request: Request): Promise<Response> {
   const cookieStore = cookies();
@@ -12,7 +13,8 @@ async function signOutAndRedirect(request: Request): Promise<Response> {
   if (token) {
     await deleteSessionByToken(token);
   }
-  const res = NextResponse.redirect(new URL(LOGIN_PATH, request.url));
+  const origin = getPublicOriginFromRequest(request);
+  const res = NextResponse.redirect(new URL(LOGIN_PATH, origin));
   res.cookies.set(SESSION_COOKIE, "", {
     httpOnly: true,
     path: "/",
