@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
 import { SESSION_COOKIE } from "@/lib/auth/session-constants";
+import type { UserRole } from "@/lib/db/enums";
 import { query, queryOne } from "@/lib/db/postgres";
 
 export { SESSION_COOKIE } from "@/lib/auth/session-constants";
@@ -9,6 +10,7 @@ const SESSION_DAYS = 14;
 export type SessionUser = {
   id: string;
   email: string;
+  role: UserRole;
 };
 
 function hashToken(token: string): string {
@@ -55,8 +57,8 @@ export async function getUserIdFromSessionToken(
 export async function getSessionUserFromToken(
   token: string,
 ): Promise<SessionUser | null> {
-  const row = await queryOne<{ id: string; email: string }>(
-    `SELECT u.id, u.email
+  const row = await queryOne<{ id: string; email: string; role: UserRole }>(
+    `SELECT u.id, u.email, u.role
      FROM public.app_sessions s
      JOIN public.users u ON u.id = s.user_id
      WHERE s.token_hash = $1
@@ -65,7 +67,7 @@ export async function getSessionUserFromToken(
     [hashToken(token)],
   );
   if (!row) return null;
-  return { id: row.id, email: row.email };
+  return { id: row.id, email: row.email, role: row.role };
 }
 
 export async function getSessionUserFromCookies(): Promise<SessionUser | null> {

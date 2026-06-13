@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Clock, Plus, Trash2, Waypoints } from "lucide-react";
+import { Clock, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -19,97 +19,152 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-type RouteAction = "AGENT" | "PHONE" | "VOICEMAIL";
+import {
+  useRoutingSettings,
+  useUpdateRoutingSettings,
+} from "@/hooks/use-routing-settings";
+import { ApiClientError } from "@/lib/api/http";
+import {
+  DEFAULT_AFTER_HOURS_MESSAGE,
+  DEFAULT_INACTIVE_MESSAGE,
+  type FallbackType,
+  type TenantRoutingSettingsV1,
+} from "@/lib/tenant-portal/routing-settings-v1";
+import { routingSettingsBodyFromV1 } from "@/lib/validation/routing-settings";
 
-type RuleRow = {
-  id: string;
-  intent: string;
-  action: RouteAction;
-  target: string;
+export type RoutingFlowBuilderProps = {
+  tenantId: string;
 };
 
-const ACTION_LABEL: Record<RouteAction, string> = {
-  AGENT: "Route to Agent",
-  PHONE: "Transfer to Phone Number",
-  VOICEMAIL: "Go to Voicemail",
+type LocalFormState = {
+  businessHoursEnabled: boolean;
+  weekdayStart: string;
+  weekdayEnd: string;
+  afterHoursFallback: FallbackType;
+  afterHoursMessage: string;
+  afterHoursPhone: string;
+  inactiveFallback: FallbackType;
+  inactiveMessage: string;
+  inactivePhone: string;
+  timezone: string;
 };
 
-const AGENT_OPTIONS = [
-  { value: "agent_receptionist", label: "Receptionist" },
-  { value: "agent_sales", label: "Sales" },
-  { value: "agent_service", label: "Service" },
-  { value: "agent_after_hours", label: "After Hours" },
-];
+function toLocalState(
+  routing: TenantRoutingSettingsV1,
+  timezone: string,
+): LocalFormState {
+  return {
+    businessHoursEnabled: routing.businessHours.enabled,
+    weekdayStart: routing.businessHours.weekdayStart,
+    weekdayEnd: routing.businessHours.weekdayEnd,
+    afterHoursFallback: routing.afterHoursFallback.type,
+    afterHoursMessage:
+      routing.afterHoursFallback.message ?? DEFAULT_AFTER_HOURS_MESSAGE,
+    afterHoursPhone: routing.afterHoursFallback.forwardTo ?? "",
+    inactiveFallback: routing.inactiveFallback.type,
+    inactiveMessage:
+      routing.inactiveFallback.message ?? DEFAULT_INACTIVE_MESSAGE,
+    inactivePhone: routing.inactiveFallback.forwardTo ?? "",
+    timezone,
+  };
+}
 
-function newId() {
-  return `rule_${Math.random().toString(36).slice(2, 10)}`;
+function toRoutingSettings(local: LocalFormState): TenantRoutingSettingsV1 {
+  const afterHoursFallback =
+    local.afterHoursFallback === "PHONE_FORWARD"
+      ? {
+          type: local.afterHoursFallback,
+          forwardTo: local.afterHoursPhone.trim(),
+        }
+      : {
+          type: local.afterHoursFallback,
+          message: local.afterHoursMessage.trim(),
+        };
+
+  const inactiveFallback =
+    local.inactiveFallback === "PHONE_FORWARD"
+      ? {
+          type: local.inactiveFallback,
+          forwardTo: local.inactivePhone.trim(),
+        }
+      : {
+          type: local.inactiveFallback,
+          message: local.inactiveMessage.trim(),
+        };
+
+  return {
+    version: 1,
+    businessHours: {
+      enabled: local.businessHoursEnabled,
+      weekdayStart: local.weekdayStart,
+      weekdayEnd: local.weekdayEnd,
+    },
+    afterHoursFallback,
+    inactiveFallback,
+  };
 }
 
 /**
- * Visual routing / IVR-style flow editor: business hours, intent→action rules, and fallbacks.
+ * Routing flow editor: business hours, after-hours fallback, and inactive-account fallback.
  */
-export function RoutingFlowBuilder() {
-  const [weekdayStart, setWeekdayStart] = React.useState("09:00");
-  const [weekdayEnd, setWeekdayEnd] = React.useState("17:30");
-  const [rules, setRules] = React.useState<RuleRow[]>([
-    {
-      id: newId(),
-      intent: "billing_or_invoice",
-      action: "AGENT",
-      target: "agent_receptionist",
-    },
-    {
-      id: newId(),
-      intent: "sales_new_customer",
-      action: "AGENT",
-      target: "agent_sales",
-    },
-    {
-      id: newId(),
-      intent: "emergency_keyword",
-      action: "PHONE",
-      target: "+16175550199",
-    },
-  ]);
+export function RoutingFlowBuilder({ tenantId }: RoutingFlowBuilderProps) {
+  const { data, isPending, error } = useRoutingSettings(tenantId);
+  const updateMutation = useUpdateRoutingSettings(tenantId);
 
-  const [afterHoursFallback, setAfterHoursFallback] = React.useState<
-    "MESSAGE" | "PHONE_FORWARD" | "BOSTEL_SUPPORT" | "VOICEMAIL"
-  >("VOICEMAIL");
-  const [afterHoursMessage, setAfterHoursMessage] = React.useState(
-    "Thanks for calling Bostel. Our office is closed. Please leave a message with your name and callback number.",
-  );
-  const [afterHoursPhone, setAfterHoursPhone] = React.useState("+16175550100");
+  const [local, setLocal] = React.useState<LocalFormState | null>(null);
+  const [saveError, setSaveError] = React.useState<string | null>(null);
 
-  const [inactiveFallback, setInactiveFallback] = React.useState<
-    "MESSAGE" | "PHONE_FORWARD" | "BOSTEL_SUPPORT" | "VOICEMAIL"
-  >("MESSAGE");
-  const [inactiveMessage, setInactiveMessage] = React.useState(
-    "This line is not accepting calls. Please try again later or visit bostel.com for support options.",
-  );
-  const [inactivePhone, setInactivePhone] = React.useState("+16175550200");
+  React.useEffect(() => {
+    if (data) {
+      setLocal(toLocalState(data.routing, data.timezone));
+      setSaveError(null);
+    }
+  }, [data]);
 
-  const addRule = () => {
-    setRules((r) => [
-      ...r,
-      {
-        id: newId(),
-        intent: "",
-        action: "AGENT",
-        target: "agent_receptionist",
-      },
-    ]);
+  const patchLocal = (patch: Partial<LocalFormState>) => {
+    setLocal((prev) => (prev ? { ...prev, ...patch } : prev));
   };
 
-  const removeRule = (id: string) => {
-    setRules((r) => r.filter((row) => row.id !== id));
+  const resetLocal = () => {
+    if (data) {
+      setLocal(toLocalState(data.routing, data.timezone));
+      setSaveError(null);
+    }
   };
 
-  const updateRule = (id: string, patch: Partial<RuleRow>) => {
-    setRules((r) =>
-      r.map((row) => (row.id === id ? { ...row, ...patch } : row)),
+  const handleSave = async () => {
+    if (!local) return;
+    setSaveError(null);
+    const routing = toRoutingSettings(local);
+    try {
+      await updateMutation.mutateAsync({
+        routing: routingSettingsBodyFromV1(routing),
+      });
+    } catch (e) {
+      setSaveError(
+        e instanceof ApiClientError ? e.message : "Could not save routing settings",
+      );
+    }
+  };
+
+  if (isPending || !local) {
+    return (
+      <div className="flex min-h-[240px] items-center justify-center text-slate-600">
+        <Loader2 className="mr-2 h-5 w-5 animate-spin" aria-hidden />
+        Loading routing settings…
+      </div>
     );
-  };
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+        Could not load routing settings. Please refresh and try again.
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">
@@ -118,11 +173,9 @@ export function RoutingFlowBuilder() {
           Routing Flow
         </h1>
         <p className="mt-1 max-w-3xl text-sm text-slate-600 sm:text-base">
-          Define business hours, map caller intents to actions, and configure
-          fallbacks for after-hours or inactive accounts (aligns with{" "}
-          <code className="rounded bg-slate-100 px-1 text-xs">RoutingFlow</code> /{" "}
-          <code className="rounded bg-slate-100 px-1 text-xs">RoutingRule</code> in
-          your data model).
+          Configure weekday business hours and fallbacks for after-hours or
+          inactive accounts. Live voice agents connect only during business
+          hours when hours are enabled.
         </p>
       </div>
 
@@ -137,168 +190,57 @@ export function RoutingFlowBuilder() {
                 Business hours
               </CardTitle>
               <CardDescription>
-                Default weekday coverage for this flow. Pair with tenant timezone
-                in production.
+                Monday–Friday coverage in your tenant timezone. Weekends are
+                always treated as after-hours when hours are enabled.
               </CardDescription>
             </div>
           </div>
         </CardHeader>
-        <CardContent className="grid gap-6 pt-6 sm:grid-cols-2 lg:max-w-2xl">
-          <div className="space-y-2">
-            <Label htmlFor="bh-start">Weekday start</Label>
-            <Input
-              id="bh-start"
-              type="time"
-              value={weekdayStart}
-              onChange={(e) => setWeekdayStart(e.target.value)}
+        <CardContent className="space-y-6 pt-6">
+          <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-200/90 bg-white p-4">
+            <div className="space-y-1">
+              <Label htmlFor="bh-enabled">Enable business hours</Label>
+              <p className="text-sm text-slate-600">
+                When off, calls connect to your voice agent 24/7.
+              </p>
+            </div>
+            <Switch
+              id="bh-enabled"
+              checked={local.businessHoursEnabled}
+              onCheckedChange={(checked) =>
+                patchLocal({ businessHoursEnabled: checked })
+              }
             />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="bh-end">Weekday end</Label>
-            <Input
-              id="bh-end"
-              type="time"
-              value={weekdayEnd}
-              onChange={(e) => setWeekdayEnd(e.target.value)}
-            />
-          </div>
-        </CardContent>
-      </Card>
 
-      <Card className="border-slate-200/90 shadow-sm">
-        <CardHeader className="flex flex-col gap-2 border-b border-slate-100 bg-slate-50/50 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-start gap-3">
-            <span className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
-              <Waypoints className="h-4 w-4" aria-hidden />
-            </span>
-            <div>
-              <CardTitle className="text-lg text-slate-900">
-                Decision logic
-              </CardTitle>
-              <CardDescription>
-                Map an <strong>intent</strong> (keyword or classifier id) to an{" "}
-                <strong>action</strong>. Rules are evaluated in list order.
-              </CardDescription>
+          <p className="text-sm text-slate-600">
+            Timezone:{" "}
+            <span className="font-medium text-slate-900">{local.timezone}</span>{" "}
+            (uses tenant timezone from settings)
+          </p>
+
+          <div className="grid gap-6 sm:grid-cols-2 lg:max-w-2xl">
+            <div className="space-y-2">
+              <Label htmlFor="bh-start">Weekday start</Label>
+              <Input
+                id="bh-start"
+                type="time"
+                value={local.weekdayStart}
+                disabled={!local.businessHoursEnabled}
+                onChange={(e) => patchLocal({ weekdayStart: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="bh-end">Weekday end</Label>
+              <Input
+                id="bh-end"
+                type="time"
+                value={local.weekdayEnd}
+                disabled={!local.businessHoursEnabled}
+                onChange={(e) => patchLocal({ weekdayEnd: e.target.value })}
+              />
             </div>
           </div>
-          <Button type="button" size="sm" className="shrink-0 gap-1" onClick={addRule}>
-            <Plus className="h-4 w-4" />
-            Add rule
-          </Button>
-        </CardHeader>
-        <CardContent className="space-y-4 pt-6">
-          <div className="hidden gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500 md:grid md:grid-cols-[1fr_180px_1fr_40px]">
-            <span>Intent</span>
-            <span>Action</span>
-            <span>Target</span>
-            <span className="text-center"> </span>
-          </div>
-          <ul className="space-y-3">
-            {rules.map((row, index) => (
-              <li
-                key={row.id}
-                className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-sm"
-              >
-                <p className="mb-3 text-xs font-semibold text-slate-500 md:hidden">
-                  Rule {index + 1}
-                </p>
-                <div className="grid gap-4 md:grid-cols-[1fr_180px_1fr_auto] md:items-end">
-                  <div className="space-y-2">
-                    <Label className="text-xs text-slate-500 md:hidden">
-                      Intent
-                    </Label>
-                    <Input
-                      placeholder="e.g. billing_or_invoice"
-                      value={row.intent}
-                      onChange={(e) =>
-                        updateRule(row.id, { intent: e.target.value })
-                      }
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs text-slate-500 md:hidden">
-                      Action
-                    </Label>
-                    <Select
-                      value={row.action}
-                      onValueChange={(v) =>
-                        updateRule(row.id, {
-                          action: v as RouteAction,
-                          target:
-                            v === "AGENT"
-                              ? "agent_receptionist"
-                              : v === "PHONE"
-                                ? "+16175550100"
-                                : "",
-                        })
-                      }
-                    >
-                      <SelectTrigger className="bg-background">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {(Object.keys(ACTION_LABEL) as RouteAction[]).map((k) => (
-                          <SelectItem key={k} value={k}>
-                            {ACTION_LABEL[k]}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2 md:col-span-1">
-                    <Label className="text-xs text-slate-500 md:hidden">
-                      Target
-                    </Label>
-                    {row.action === "AGENT" ? (
-                      <Select
-                        value={row.target}
-                        onValueChange={(v) =>
-                          updateRule(row.id, { target: v })
-                        }
-                      >
-                        <SelectTrigger className="bg-background">
-                          <SelectValue placeholder="Agent" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {AGENT_OPTIONS.map((a) => (
-                            <SelectItem key={a.value} value={a.value}>
-                              {a.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    ) : row.action === "PHONE" ? (
-                      <Input
-                        placeholder="+1 E.164 number"
-                        value={row.target}
-                        onChange={(e) =>
-                          updateRule(row.id, { target: e.target.value })
-                        }
-                      />
-                    ) : (
-                      <Input
-                        readOnly
-                        className="bg-muted/40 text-muted-foreground"
-                        value="Standard tenant voicemail"
-                      />
-                    )}
-                  </div>
-                  <div className="flex justify-end md:pb-0.5">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="text-slate-500 hover:text-destructive"
-                      onClick={() => removeRule(row.id)}
-                      aria-label={`Remove rule ${index + 1}`}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
         </CardContent>
       </Card>
 
@@ -306,12 +248,8 @@ export function RoutingFlowBuilder() {
         <CardHeader className="border-b border-amber-100/80">
           <CardTitle className="text-lg text-slate-900">Fallback</CardTitle>
           <CardDescription className="text-slate-700">
-            When a call arrives <strong>outside business hours</strong> or when the{" "}
-            <strong>account is inactive</strong>, callers never reach live agents —
-            use these paths instead (maps to{" "}
-            <code className="rounded bg-white/80 px-1 text-xs">fallbackType</code>{" "}
-            on <code className="rounded bg-white/80 px-1 text-xs">RoutingFlow</code>
-            ).
+            When a call arrives outside business hours or when the account is
+            inactive, callers never reach live agents — use these paths instead.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-8 pt-6 lg:grid-cols-2">
@@ -322,11 +260,9 @@ export function RoutingFlowBuilder() {
             <div className="space-y-2">
               <Label>Action type</Label>
               <Select
-                value={afterHoursFallback}
+                value={local.afterHoursFallback}
                 onValueChange={(v) =>
-                  setAfterHoursFallback(
-                    v as typeof afterHoursFallback,
-                  )
+                  patchLocal({ afterHoursFallback: v as FallbackType })
                 }
               >
                 <SelectTrigger className="bg-background">
@@ -342,24 +278,28 @@ export function RoutingFlowBuilder() {
                 </SelectContent>
               </Select>
             </div>
-            {(afterHoursFallback === "MESSAGE" ||
-              afterHoursFallback === "VOICEMAIL" ||
-              afterHoursFallback === "BOSTEL_SUPPORT") && (
+            {(local.afterHoursFallback === "MESSAGE" ||
+              local.afterHoursFallback === "VOICEMAIL" ||
+              local.afterHoursFallback === "BOSTEL_SUPPORT") && (
               <div className="space-y-2">
                 <Label>Caller-facing script</Label>
                 <Textarea
                   className="min-h-[100px]"
-                  value={afterHoursMessage}
-                  onChange={(e) => setAfterHoursMessage(e.target.value)}
+                  value={local.afterHoursMessage}
+                  onChange={(e) =>
+                    patchLocal({ afterHoursMessage: e.target.value })
+                  }
                 />
               </div>
             )}
-            {afterHoursFallback === "PHONE_FORWARD" && (
+            {local.afterHoursFallback === "PHONE_FORWARD" && (
               <div className="space-y-2">
                 <Label>Forward to (E.164)</Label>
                 <Input
-                  value={afterHoursPhone}
-                  onChange={(e) => setAfterHoursPhone(e.target.value)}
+                  value={local.afterHoursPhone}
+                  onChange={(e) =>
+                    patchLocal({ afterHoursPhone: e.target.value })
+                  }
                 />
               </div>
             )}
@@ -372,9 +312,9 @@ export function RoutingFlowBuilder() {
             <div className="space-y-2">
               <Label>Action type</Label>
               <Select
-                value={inactiveFallback}
+                value={local.inactiveFallback}
                 onValueChange={(v) =>
-                  setInactiveFallback(v as typeof inactiveFallback)
+                  patchLocal({ inactiveFallback: v as FallbackType })
                 }
               >
                 <SelectTrigger className="bg-background">
@@ -390,13 +330,15 @@ export function RoutingFlowBuilder() {
                 </SelectContent>
               </Select>
             </div>
-            {inactiveFallback !== "PHONE_FORWARD" ? (
+            {local.inactiveFallback !== "PHONE_FORWARD" ? (
               <div className="space-y-2">
                 <Label>Message</Label>
                 <Textarea
                   className="min-h-[100px]"
-                  value={inactiveMessage}
-                  onChange={(e) => setInactiveMessage(e.target.value)}
+                  value={local.inactiveMessage}
+                  onChange={(e) =>
+                    patchLocal({ inactiveMessage: e.target.value })
+                  }
                 />
               </div>
             ) : (
@@ -404,8 +346,10 @@ export function RoutingFlowBuilder() {
                 <Label>Forward to (E.164)</Label>
                 <Input
                   placeholder="+1…"
-                  value={inactivePhone}
-                  onChange={(e) => setInactivePhone(e.target.value)}
+                  value={local.inactivePhone}
+                  onChange={(e) =>
+                    patchLocal({ inactivePhone: e.target.value })
+                  }
                 />
               </div>
             )}
@@ -413,11 +357,30 @@ export function RoutingFlowBuilder() {
         </CardContent>
       </Card>
 
+      {saveError ? (
+        <p className="text-sm text-red-600" role="alert">
+          {saveError}
+        </p>
+      ) : null}
+
       <div className="flex justify-end gap-2">
-        <Button type="button" variant="outline">
+        <Button type="button" variant="outline" onClick={resetLocal}>
           Discard
         </Button>
-        <Button type="button">Save flow</Button>
+        <Button
+          type="button"
+          onClick={handleSave}
+          disabled={updateMutation.isPending}
+        >
+          {updateMutation.isPending ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+              Saving…
+            </>
+          ) : (
+            "Save flow"
+          )}
+        </Button>
       </div>
     </div>
   );

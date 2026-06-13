@@ -7,7 +7,7 @@ const nextConfig = {
   /** Smaller deployable for Docker / Node hosting: https://nextjs.org/docs/app/api-reference/next-config-js/output */
   output: "standalone",
   experimental: {
-    serverComponentsExternalPackages: ["pg", "bcryptjs"],
+    serverComponentsExternalPackages: ["pg", "bcryptjs", "pdf-parse", "pdfjs-dist"],
     /** Trust X-Forwarded-Host/Proto from Caddy and server.prod when proxied. */
     trustHost: true,
   },

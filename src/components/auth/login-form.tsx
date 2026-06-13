@@ -17,9 +17,20 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 type LoginFormProps = {
   defaultRedirect?: string;
+  /** When set, overrides API redirect after login. */
+  forceRedirect?: string;
+  showSignupLink?: boolean;
+  title?: string;
+  description?: string;
 };
 
-export function LoginForm({ defaultRedirect = "/portal" }: LoginFormProps) {
+export function LoginForm({
+  defaultRedirect = "/portal",
+  forceRedirect,
+  showSignupLink = true,
+  title = "Welcome back",
+  description = "Enter your credentials to access your workspace.",
+}: LoginFormProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get("redirect") ?? defaultRedirect;
@@ -53,7 +64,14 @@ export function LoginForm({ defaultRedirect = "/portal" }: LoginFormProps) {
         setSubmitting(false);
         return;
       }
-      router.push(redirectTo.startsWith("/") ? redirectTo : "/portal");
+      const body = (await res.json().catch(() => ({}))) as {
+        redirectTo?: string;
+      };
+      const destination =
+        forceRedirect ??
+        body.redirectTo ??
+        (redirectTo.startsWith("/") ? redirectTo : defaultRedirect);
+      router.push(destination);
       router.refresh();
     } catch {
       setError("Something went wrong. Please try again.");
@@ -65,11 +83,9 @@ export function LoginForm({ defaultRedirect = "/portal" }: LoginFormProps) {
     <Card className="border-border/60 bg-card/80 shadow-[0_8px_30px_rgb(0,0,0,0.04)] backdrop-blur-sm">
       <CardHeader className="space-y-1 pb-2">
         <CardTitle className="text-xl font-semibold tracking-tight">
-          Welcome back
+          {title}
         </CardTitle>
-        <CardDescription>
-          Enter your credentials to access your workspace.
-        </CardDescription>
+        <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent>
         <form className="space-y-5" onSubmit={(e) => void onSubmit(e)}>
@@ -115,15 +131,17 @@ export function LoginForm({ defaultRedirect = "/portal" }: LoginFormProps) {
               "Sign in"
             )}
           </Button>
-          <p className="text-center text-sm text-muted-foreground">
-            No account?{" "}
-            <Link
-              href="/signup"
-              className="font-medium text-primary underline-offset-4 transition-colors hover:underline"
-            >
-              Create one
-            </Link>
-          </p>
+          {showSignupLink ? (
+            <p className="text-center text-sm text-muted-foreground">
+              No account?{" "}
+              <Link
+                href="/signup"
+                className="font-medium text-primary underline-offset-4 transition-colors hover:underline"
+              >
+                Create one
+              </Link>
+            </p>
+          ) : null}
         </form>
       </CardContent>
     </Card>

@@ -1,4 +1,4 @@
-const MAX_BUFFER_CHARS = 48;
+const MAX_BUFFER_CHARS = 250;
 
 /**
  * Buffers streamed LLM tokens and emits speakable sentence chunks early.

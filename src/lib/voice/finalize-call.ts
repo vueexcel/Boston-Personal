@@ -102,6 +102,12 @@ export async function finalizeInboundCall(
             twilioPriceUnit: twilioInsights.priceUnit,
           }
         : {}),
+      ...(session?.extraInformation?.length
+        ? { extraInformation: session.extraInformation }
+        : {}),
+      ...(session?.conversationState
+        ? { conversationState: session.conversationState }
+        : {}),
     },
     metadataMerge: true as const,
   };

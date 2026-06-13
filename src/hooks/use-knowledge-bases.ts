@@ -7,6 +7,8 @@ import {
 } from "@tanstack/react-query";
 import {
   createKnowledgeBase,
+  createKnowledgeBaseFromFile,
+  createKnowledgeBaseFromWebsite,
   createKnowledgeDocument,
   deleteKnowledgeBase,
   deleteKnowledgeDocument,
@@ -54,6 +56,32 @@ export function useCreateKnowledgeBase(tenantId: string) {
   return useMutation({
     mutationFn: (body: CreateKnowledgeBaseBody) =>
       createKnowledgeBase(tenantId, body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.knowledgeBases.all(tenantId),
+      });
+    },
+  });
+}
+
+export function useCreateKnowledgeBaseFromFile(tenantId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (params: { file: File; name?: string }) =>
+      createKnowledgeBaseFromFile(tenantId, params),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.knowledgeBases.all(tenantId),
+      });
+    },
+  });
+}
+
+export function useCreateKnowledgeBaseFromWebsite(tenantId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (params: { url: string; name?: string }) =>
+      createKnowledgeBaseFromWebsite(tenantId, params),
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.knowledgeBases.all(tenantId),

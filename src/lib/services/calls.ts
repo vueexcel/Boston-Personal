@@ -13,12 +13,16 @@ import {
   dispositionLabel,
   getMetadataActionItems,
   getMetadataCollectedInfo,
+  getMetadataExtraInformation,
   getMetadataSentiment,
   getMetadataString,
   parseTranscriptTurns,
   type TranscriptTurn,
 } from "@/lib/services/call-metadata";
-import type { CollectedInfoItem } from "@/lib/services/call-collected-info";
+import type {
+  CollectedInfoItem,
+  ExtraInformationItem,
+} from "@/lib/services/call-collected-info";
 import { refreshTenantMetaCacheAfterWrite } from "@/lib/services/tenant";
 import type { CallSentiment } from "@/lib/services/openai-agent";
 import { fetchTwilioCallInsights } from "@/lib/integrations/twilio-call-logs";
@@ -116,6 +120,7 @@ export type CallLogDetail = CallLogListItem & {
   sentiment: CallSentiment | null;
   actionItems: string[];
   collectedInfo: CollectedInfoItem[];
+  extraInformation: ExtraInformationItem[];
   turnCount: number;
 };
 
@@ -329,6 +334,7 @@ export async function getCallDetailForTenant(
     sentiment: getMetadataSentiment(meta),
     actionItems: getMetadataActionItems(meta),
     collectedInfo: getMetadataCollectedInfo(meta),
+    extraInformation: getMetadataExtraInformation(meta),
     turnCount,
   };
 }

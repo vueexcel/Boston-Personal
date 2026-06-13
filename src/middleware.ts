@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getPublicOrigin } from "@/lib/auth/public-origin";
-import { LOGIN_PATH } from "@/lib/auth/routes";
+import { ADMIN_LOGIN_PATH, LOGIN_PATH } from "@/lib/auth/routes";
 import { SESSION_COOKIE } from "@/lib/auth/session-constants";
 
 /** Cookie presence only — full session validation runs in server layouts/API. */
@@ -31,14 +31,35 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
+  const isAdminLogin = pathname === ADMIN_LOGIN_PATH;
+  if (pathname.startsWith("/admin") && !isAdminLogin && !loggedIn) {
+    const redirectUrl = new URL(ADMIN_LOGIN_PATH, origin);
+    redirectUrl.searchParams.set(
+      "redirect",
+      `${pathname}${request.nextUrl.search}`,
+    );
+    return NextResponse.redirect(redirectUrl);
+  }
+
   const authEntryPaths = new Set([LOGIN_PATH, "/login", "/signup"]);
   if (authEntryPaths.has(pathname) && loggedIn) {
-    return NextResponse.redirect(new URL("/portal", origin));
+    return NextResponse.redirect(new URL("/auth/home", origin));
+  }
+
+  if (isAdminLogin && loggedIn) {
+    return NextResponse.redirect(new URL("/auth/home", origin));
   }
 
   return response;
 }
 
 export const config = {
-  matcher: ["/portal/:path*", "/", "/login", "/signup"],
+  matcher: [
+    "/portal/:path*",
+    "/admin/:path*",
+    "/",
+    "/login",
+    "/signup",
+    "/auth/home",
+  ],
 };

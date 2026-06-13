@@ -29,3 +29,27 @@ if (fs.existsSync(publicSrc)) {
   fs.cpSync(publicSrc, publicDest, { recursive: true });
   console.log("[postbuild] Copied public → .next/standalone/public");
 }
+
+/** pdf-parse / pdfjs-dist needs the worker beside pdf.mjs in standalone output. */
+const pdfWorkerSrc = path.join(
+  "node_modules",
+  "pdfjs-dist",
+  "legacy",
+  "build",
+  "pdf.worker.mjs",
+);
+const pdfWorkerDest = path.join(
+  standalone,
+  "node_modules",
+  "pdfjs-dist",
+  "legacy",
+  "build",
+  "pdf.worker.mjs",
+);
+if (fs.existsSync(pdfWorkerSrc)) {
+  fs.mkdirSync(path.dirname(pdfWorkerDest), { recursive: true });
+  fs.copyFileSync(pdfWorkerSrc, pdfWorkerDest);
+  console.log(
+    "[postbuild] Copied pdfjs-dist worker → .next/standalone/node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs",
+  );
+}

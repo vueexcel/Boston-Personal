@@ -111,6 +111,7 @@ export function buildPhoneConversationStyleBlock(): string {
     "- If the caller declines follow-up or transfer, respect that and continue on the call.",
     "- Do not end the call on hesitation or mid-correction — only when they clearly say goodbye.",
     "- When they clearly say goodbye, reply with a brief polite farewell only.",
+    "- If the caller shares extra details not in COLLECT (preferences, constraints, callback times), acknowledge briefly; they will be logged separately.",
   ].join("\n");
 }
 
@@ -128,6 +129,9 @@ export function buildCollectWorkflowBlock(infoToCollect: string[]): string {
     "- Ask only ONE COLLECT question per turn.",
     "- Use COLLECTED SO FAR and conversation history — never re-ask a field that already has a value.",
     "- Phrase COLLECT questions naturally, not as a rigid form.",
+    "- If the caller volunteers facts outside COLLECT (e.g. callback preferences, location, do-not-call times), acknowledge them briefly without blocking the conversation.",
+    "- Use CONVERSATION STATE when present: answer direct questions first, then ask for the highest-priority missing slot.",
+    "- When asking for a phone number, request a 10-digit number including area code.",
   ].join("\n");
 }
 
@@ -248,10 +252,11 @@ export function buildBehaviourBlockFromConfig(
       if (!fields.language?.trim()) return "";
       const code = toElevenLabsTtsLanguageCode(fields.language);
       const label = flashV25LanguageLabel(fields.language);
-      if (code !== "en") {
-        return `Language: ${label} (${code}). Respond in ${label}; user speech and synthesized voice use this language.`;
-      }
-      return `Language: ${label} (${code}).`;
+      return [
+        `Language: ${label} (${code}).`,
+        `Respond ONLY in ${label}. Never switch languages.`,
+        `If the caller speaks another language, say you cannot understand and ask them to speak in ${label}.`,
+      ].join(" ");
     })(),
   ]
     .filter(Boolean)

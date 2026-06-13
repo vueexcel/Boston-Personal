@@ -1,9 +1,17 @@
+export type KnowledgeDocumentSourceMeta = {
+  section?: string;
+  originalFileName?: string;
+  sourceUrl?: string;
+  sortOrder?: number;
+};
+
 export type KnowledgeDocument = {
   id: string;
   tenantId: string;
   knowledgeBaseId: string;
   content: string;
   sourceType: string;
+  sourceMeta: KnowledgeDocumentSourceMeta | null;
   createdAt: string;
   updatedAt: string;
 };

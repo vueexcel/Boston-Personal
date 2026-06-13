@@ -44,6 +44,8 @@ const testSessionStore: VoiceSessionStore = {
       turnCount: session.turnCount,
       greetingPlayed: session.greetingPlayed,
       collectedInfo: session.collectedInfo,
+      extraInformation: session.extraInformation,
+      conversationState: session.conversationState,
     };
     await saveTestCallSession(updated);
   },

@@ -35,6 +35,8 @@ function toVoiceSession(session: TwilioCallSession): VoiceConversationSession {
     collectedInfo:
       session.collectedInfo ??
       initialCollectedMap(session.agentSnapshot.infoToCollect),
+    extraInformation: session.extraInformation ?? [],
+    conversationState: session.conversationState,
   };
 }
 
@@ -52,6 +54,8 @@ const twilioSessionStore: VoiceSessionStore = {
       turnCount: session.turnCount,
       greetingPlayed: session.greetingPlayed,
       collectedInfo: session.collectedInfo,
+      extraInformation: session.extraInformation,
+      conversationState: session.conversationState,
     };
     await saveCallSession(updated);
   },

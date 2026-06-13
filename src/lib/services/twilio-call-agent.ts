@@ -8,10 +8,15 @@ import { resolveLocalizedGreeting } from "@/lib/services/greeting-translate";
 import { screenRuntimeUserMessage } from "@/lib/prompt-content-safety-patterns";
 import { buildPhoneConversationStyleBlock } from "@/lib/services/prompt-assembler";
 import { SentenceBuffer } from "@/lib/voice/sentence-buffer";
+import { TtsSentenceMerger } from "@/lib/voice/tts-text";
 import {
   formatCollectedInfoBlock,
   type CollectedInfoMap,
 } from "@/lib/services/call-collected-info";
+import {
+  formatConversationStateBlock,
+  type CallConversationState,
+} from "@/lib/services/call-conversation-state";
 import { parseAgentPortalConfig } from "@/lib/tenant-portal/agent-config-v1";
 import { getVoiceOpenAiModel } from "@/lib/voice/voice-tuning";
 import type { AgentTestDraft } from "@/lib/validation/agent-test";
@@ -88,16 +93,19 @@ export function resolveInfoToCollect(
 export function buildVoiceSystemPrompt(
   snapshot: CallAgentSnapshot,
   collectedInfo?: CollectedInfoMap,
+  conversationState?: CallConversationState | null,
 ): string {
   const collectedBlock = formatCollectedInfoBlock(
     snapshot.infoToCollect,
     collectedInfo ?? {},
   );
+  const stateBlock = formatConversationStateBlock(conversationState);
   const parts = [
     snapshot.systemPrompt,
     buildPhoneConversationStyleBlock(),
     buildVoicePersonaBlock(snapshot),
     collectedBlock,
+    stateBlock,
     `[tenant=${snapshot.tenantId}]`,
   ].filter((p) => p.trim());
   return parts.join("\n\n");
@@ -194,6 +202,7 @@ function buildOpenAiMessages(
   messages: CallChatMessage[],
   userText: string,
   collectedInfo?: CollectedInfoMap,
+  conversationState?: CallConversationState | null,
 ): { role: "system" | "user" | "assistant"; content: string }[] {
   const openAiMessages: {
     role: "system" | "user" | "assistant";
@@ -201,7 +210,11 @@ function buildOpenAiMessages(
   }[] = [
     {
       role: "system",
-      content: buildVoiceSystemPrompt(snapshot, collectedInfo),
+      content: buildVoiceSystemPrompt(
+        snapshot,
+        collectedInfo,
+        conversationState,
+      ),
     },
   ];
 
@@ -276,6 +289,7 @@ export async function runCallTurnStream(
   userText: string,
   callbacks: CallTurnStreamCallbacks,
   collectedInfo?: CollectedInfoMap,
+  conversationState?: CallConversationState | null,
 ): Promise<{ fullReply: string; model: string }> {
   const env = getServerEnv();
   if (!env.OPENAI_API_KEY?.trim()) {
@@ -296,6 +310,7 @@ export async function runCallTurnStream(
   const client = getOpenAIClient();
   const model = getVoiceOpenAiModel();
   const sentenceBuffer = new SentenceBuffer();
+  const ttsMerger = new TtsSentenceMerger();
   let fullReply = "";
 
   const stream = await client.chat.completions.create({
@@ -308,6 +323,7 @@ export async function runCallTurnStream(
       messages,
       trimmedUser,
       collectedInfo,
+      conversationState,
     ),
   });
 
@@ -327,14 +343,22 @@ export async function runCallTurnStream(
     fullReply += delta;
     for (const sentence of sentenceBuffer.push(delta)) {
       if (callbacks.signal?.aborted) break;
-      await callbacks.onSentence(sentence);
+      for (const chunk of ttsMerger.push(sentence)) {
+        await callbacks.onSentence(chunk);
+      }
     }
   }
 
   if (!callbacks.signal?.aborted) {
     const tail = sentenceBuffer.flush();
     if (tail) {
-      await callbacks.onSentence(tail);
+      for (const chunk of ttsMerger.push(tail)) {
+        await callbacks.onSentence(chunk);
+      }
+    }
+    const mergedTail = ttsMerger.flush();
+    if (mergedTail) {
+      await callbacks.onSentence(mergedTail);
     }
   }
 

@@ -1,8 +1,16 @@
 import {
+  getNextCollectField,
   initialCollectedMap,
   updateCollectedInfoFromMessages,
+  updateExtraInformationFromMessages,
   type CollectedInfoMap,
+  type ExtraInformationItem,
 } from "@/lib/services/call-collected-info";
+import {
+  initialConversationState,
+  updateConversationState,
+  type CallConversationState,
+} from "@/lib/services/call-conversation-state";
 import {
   runCallTurnStream,
   type CallAgentSnapshot,
@@ -42,6 +50,29 @@ import {
   getGoodbyeFarewell,
   isGoodbyeIntent,
 } from "@/lib/voice/goodbye-intent";
+import {
+  getClarificationFallbackPhrase,
+  getErrorRetryPhrase,
+  getInactivityFarewellPhrase,
+  getLanguageRepromptPhrase,
+  getMaxTurnsFarewellPhrase,
+  getTimeLimitFarewellPhrase,
+} from "@/lib/voice/call-phrases";
+import {
+  getEntityConfirmPhrase,
+  getSpellBackPrompt,
+  isAffirmativeResponse,
+  isCollectFieldEntityLike,
+  isLikelySpelledName,
+  isNegativeResponse,
+  isShortEntityAnswer,
+  parseSpelledLetters,
+  shouldSkipEntityCaptureForIntent,
+} from "@/lib/voice/entity-capture";
+import {
+  isUtteranceLanguageMismatch,
+  shouldUseLanguageReprompt,
+} from "@/lib/voice/utterance-language";
 import { getVoiceTuningConfig } from "@/lib/voice/voice-tuning";
 import { ElevenLabsScribeRealtimeStt } from "@/lib/voice/elevenlabs-scribe-realtime-stt";
 import { VoiceSessionLogger } from "@/lib/voice/voice-session-logger";
@@ -56,6 +87,8 @@ export type VoiceConversationSession = {
   agentSnapshot: CallAgentSnapshot;
   greetingPlayed: boolean;
   collectedInfo: CollectedInfoMap;
+  extraInformation?: ExtraInformationItem[];
+  conversationState?: CallConversationState;
 };
 
 export type VoiceConversationTransport = {
@@ -106,6 +139,8 @@ type EngineState =
 
 const MAX_TURNS = 40;
 const MAX_SCRIBE_RECONNECTS = 5;
+const MAX_UNCLEAR_UTTERANCES = 3;
+const MAX_LANGUAGE_REPROMPTS = 2;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -135,6 +170,16 @@ export class VoiceConversationEngine {
   private readonly sttMode: VoiceSttMode;
   private sessionLogger: VoiceSessionLogger | null = null;
   private readonly bargeInCollector: BargeInUtteranceCollector;
+  private inactivityTimer: ReturnType<typeof setTimeout> | null = null;
+  private inactivityFired = false;
+  private languageCheckSuppressed = false;
+  private unclearUtteranceCount = 0;
+  private languageRepromptCount = 0;
+  private pendingEntityConfirm: {
+    field: string;
+    value: string;
+    awaitingSpell?: boolean;
+  } | null = null;
 
   constructor(private readonly options: VoiceConversationEngineOptions) {
     this.sttMode = options.sttMode ?? "server";
@@ -176,6 +221,10 @@ export class VoiceConversationEngine {
       collectedInfo:
         session.collectedInfo ??
         initialCollectedMap(session.agentSnapshot.infoToCollect),
+      extraInformation: session.extraInformation ?? [],
+      conversationState:
+        session.conversationState ??
+        initialConversationState(session.agentSnapshot.infoToCollect),
     };
     this.sessionLogger = new VoiceSessionLogger(
       sessionId,
@@ -309,6 +358,42 @@ export class VoiceConversationEngine {
     );
   }
 
+  private clearInactivityTimer(): void {
+    if (this.inactivityTimer) {
+      clearTimeout(this.inactivityTimer);
+      this.inactivityTimer = null;
+    }
+  }
+
+  private armInactivityTimer(): void {
+    if (this.state === "ended" || this.inactivityFired) return;
+    this.clearInactivityTimer();
+    const sec = this.voiceTuning.callerInactivitySec;
+    if (sec <= 0) return;
+    this.inactivityTimer = setTimeout(() => {
+      void this.onInactivityTimeout();
+    }, sec * 1000);
+  }
+
+  private resetInactivityTimer(): void {
+    if (this.state === "ended" || this.inactivityFired) return;
+    this.armInactivityTimer();
+  }
+
+  private async onInactivityTimeout(): Promise<void> {
+    if (this.state === "ended" || this.inactivityFired) return;
+    if (this.processingUtterance || this.state === "speaking" || this.state === "greeting") {
+      this.armInactivityTimer();
+      return;
+    }
+    this.inactivityFired = true;
+    this.clearInactivityTimer();
+    const language = this.session?.agentSnapshot.language;
+    const farewell = getInactivityFarewellPhrase(language);
+    void this.sessionLogger?.log("inactivity_hangup", { farewell });
+    await this.endCall(farewell);
+  }
+
   private async enterListening(reason: string): Promise<void> {
     if (this.state === "ended") return;
     this.state = "listening";
@@ -326,6 +411,9 @@ export class VoiceConversationEngine {
           scribeReady: this.scribeStt?.isReady() ?? false,
         },
       });
+    }
+    if (!this.bargeInCollector.isActive()) {
+      this.armInactivityTimer();
     }
     if (this.bargeInCollector.isActive()) return;
     await this.flushCallerSpeechBuffer();
@@ -433,6 +521,10 @@ export class VoiceConversationEngine {
       this.sttMode === "client"
         ? shouldTriggerClientBargeIn(event, this.voiceTuning)
         : shouldTriggerBargeIn(event, this.voiceTuning);
+
+    if (message.final || triggerBargeIn) {
+      this.resetInactivityTimer();
+    }
 
     if (
       interruptible &&
@@ -542,6 +634,50 @@ export class VoiceConversationEngine {
       return;
     }
 
+    if (this.pendingEntityConfirm) {
+      await this.handleEntityConfirmTurn(text);
+      return;
+    }
+
+    const nextField = getNextCollectField(
+      this.session.agentSnapshot.infoToCollect,
+      this.session.collectedInfo,
+    );
+
+    if (
+      nextField &&
+      isCollectFieldEntityLike(nextField) &&
+      !shouldSkipEntityCaptureForIntent(text) &&
+      isShortEntityAnswer(text)
+    ) {
+      const tokens = text.split(/\s+/).filter(Boolean);
+      if (tokens.length === 1 && tokens[0].length >= 5) {
+        await this.startEntityConfirm(nextField, tokens[0], text);
+        return;
+      }
+    }
+
+    const language = this.session.agentSnapshot.language;
+    const answeringCollect =
+      Boolean(nextField) &&
+      isShortEntityAnswer(text) &&
+      text.split(/\s+/).length <= 3;
+
+    if (await shouldUseLanguageReprompt(text, language)) {
+      if (this.languageRepromptCount < MAX_LANGUAGE_REPROMPTS) {
+        await this.handleUnclearUtterance(text, "language");
+        return;
+      }
+    } else if (
+      await isUtteranceLanguageMismatch(text, language, {
+        answeringCollectField: answeringCollect,
+        suppressAfterSuccessfulTurn: this.languageCheckSuppressed,
+      })
+    ) {
+      await this.handleUnclearUtterance(text, "clarification");
+      return;
+    }
+
     if (this.processingUtterance) {
       this.queuePendingTranscript(text);
       this.interruptPlayback("new-utterance-queued");
@@ -560,6 +696,171 @@ export class VoiceConversationEngine {
     }
 
     await this.runTurn(text);
+  }
+
+  private async handleUnclearUtterance(
+    userText: string,
+    kind: "clarification" | "language",
+  ): Promise<void> {
+    if (!this.session || this.processingUtterance) return;
+
+    if (kind === "language") {
+      this.languageRepromptCount += 1;
+    } else {
+      this.unclearUtteranceCount += 1;
+      if (this.unclearUtteranceCount > MAX_UNCLEAR_UTTERANCES) {
+        await this.runTurn(userText);
+        return;
+      }
+    }
+
+    this.processingUtterance = true;
+    this.endpointDebouncer?.reset();
+    this.bargeInCollector.reset();
+    this.languageCheckSuppressed = false;
+
+    const phrase =
+      kind === "language"
+        ? getLanguageRepromptPhrase(this.session.agentSnapshot.language)
+        : getClarificationFallbackPhrase(this.session.agentSnapshot);
+
+    void this.sessionLogger?.log("unclear_utterance", {
+      userText,
+      kind,
+      phrase,
+    });
+
+    const gen = this.speakGeneration;
+    await this.speakSentence(phrase, gen);
+
+    if (this.speakGeneration === gen && this.session) {
+      this.session.messages.push({ role: "user", content: userText });
+      this.session.messages.push({ role: "assistant", content: phrase });
+      await this.persistSessionState();
+      this.options.transport.sendTranscript?.({
+        role: "assistant",
+        text: phrase,
+        final: true,
+      });
+    }
+
+    this.processingUtterance = false;
+    await this.enterListening(
+      kind === "language" ? "language-reprompt" : "clarification",
+    );
+  }
+
+  private async startEntityConfirm(
+    field: string,
+    value: string,
+    userText: string,
+  ): Promise<void> {
+    if (!this.session || this.processingUtterance) return;
+    this.pendingEntityConfirm = { field, value };
+    const phrase = getEntityConfirmPhrase(
+      value,
+      field,
+      this.session.agentSnapshot.language,
+    );
+    await this.speakAssistantPhrase(userText, phrase, "entity-confirm");
+  }
+
+  private async handleEntityConfirmTurn(userText: string): Promise<void> {
+    if (!this.session || !this.pendingEntityConfirm) return;
+
+    const pending = this.pendingEntityConfirm;
+
+    if (pending.awaitingSpell) {
+      const spelled = parseSpelledLetters(userText);
+      const value = (spelled ?? userText.trim()).replace(/[.!?]+$/, "").trim();
+      if (value.length >= 2) {
+        await this.storeCollectFieldValue(pending.field, value, userText);
+        return;
+      }
+    }
+
+    if (isAffirmativeResponse(userText)) {
+      await this.storeCollectFieldValue(pending.field, pending.value, userText);
+      return;
+    }
+
+    if (isNegativeResponse(userText)) {
+      this.pendingEntityConfirm = { ...pending, awaitingSpell: true };
+      await this.speakAssistantPhrase(
+        userText,
+        getSpellBackPrompt(pending.field),
+        "entity-spell",
+      );
+      return;
+    }
+
+    if (isLikelySpelledName(userText)) {
+      const spelled = parseSpelledLetters(userText);
+      if (spelled) {
+        await this.startEntityConfirm(pending.field, spelled, userText);
+        return;
+      }
+    }
+
+    this.pendingEntityConfirm = null;
+    await this.runTurn(userText);
+  }
+
+  private async storeCollectFieldValue(
+    field: string,
+    value: string,
+    userText: string,
+  ): Promise<void> {
+    if (!this.session) return;
+    this.session.collectedInfo = {
+      ...this.session.collectedInfo,
+      [field]: value,
+    };
+    const ack = `Got it — ${field}: ${value}.`;
+    await this.speakAssistantPhrase(userText, ack, "entity-stored");
+    this.pendingEntityConfirm = null;
+    await this.persistSessionState();
+  }
+
+  private async speakAssistantPhrase(
+    userText: string,
+    phrase: string,
+    reason: string,
+  ): Promise<void> {
+    if (!this.session) return;
+    this.processingUtterance = true;
+    this.endpointDebouncer?.reset();
+    const gen = this.speakGeneration;
+    await this.speakSentence(phrase, gen);
+    if (this.speakGeneration === gen) {
+      this.session.messages.push({ role: "user", content: userText });
+      this.session.messages.push({ role: "assistant", content: phrase });
+      await this.persistSessionState();
+      this.options.transport.sendTranscript?.({
+        role: "assistant",
+        text: phrase,
+        final: true,
+      });
+    }
+    this.processingUtterance = false;
+    void this.sessionLogger?.log(reason, { userText, phrase });
+    await this.enterListening(reason);
+  }
+
+  private async persistSessionState(): Promise<void> {
+    if (!this.session) return;
+    this.session.conversationState = updateConversationState(
+      this.session.messages,
+      this.session.agentSnapshot.infoToCollect,
+      this.session.collectedInfo,
+      this.session.conversationState,
+    );
+    this.session.extraInformation = updateExtraInformationFromMessages(
+      this.session.messages,
+      this.session.agentSnapshot.infoToCollect,
+      this.session.extraInformation ?? [],
+    );
+    await this.options.store.saveSession(this.session);
   }
 
   private async handleGoodbyeTurn(userText: string): Promise<void> {
@@ -592,7 +893,9 @@ export class VoiceConversationEngine {
     }
 
     if (this.session.turnCount >= MAX_TURNS) {
-      await this.endCall("Thanks for calling. Goodbye.");
+      await this.endCall(
+        getMaxTurnsFarewellPhrase(this.session.agentSnapshot.language),
+      );
       return;
     }
 
@@ -600,7 +903,7 @@ export class VoiceConversationEngine {
       (Date.now() - new Date(this.session.startedAt).getTime()) / 1000;
     if (elapsedSec >= this.session.agentSnapshot.maxDurationSec) {
       await this.endCall(
-        "We're at the time limit for this call. Thanks for calling. Goodbye.",
+        getTimeLimitFarewellPhrase(this.session.agentSnapshot.language),
       );
       return;
     }
@@ -648,6 +951,7 @@ export class VoiceConversationEngine {
           },
         },
         this.session.collectedInfo,
+        this.session.conversationState,
       );
 
       if (signal.aborted || turnId !== this.activeTurnId) {
@@ -667,7 +971,24 @@ export class VoiceConversationEngine {
       }
 
       const reply = result.fullReply.trim();
-      if (!reply) return;
+      if (!reply) {
+        this.unclearUtteranceCount += 1;
+        const phrase = getClarificationFallbackPhrase(
+          this.session.agentSnapshot,
+        );
+        await this.speakSentence(phrase, speakGenAtStart);
+        if (this.speakGeneration === speakGenAtStart) {
+          this.session.messages.push({ role: "user", content: transcript });
+          this.session.messages.push({ role: "assistant", content: phrase });
+          await this.persistSessionState();
+          this.options.transport.sendTranscript?.({
+            role: "assistant",
+            text: phrase,
+            final: true,
+          });
+        }
+        return;
+      }
 
       const updated = await this.options.store.appendMessages(
         this.session.sessionId,
@@ -675,17 +996,33 @@ export class VoiceConversationEngine {
         reply,
       );
       if (updated) {
+        const collectedInfo = updateCollectedInfoFromMessages(
+          updated.messages,
+          updated.agentSnapshot.infoToCollect,
+          this.session.collectedInfo,
+        );
+        const conversationState = updateConversationState(
+          updated.messages,
+          updated.agentSnapshot.infoToCollect,
+          collectedInfo,
+          this.session.conversationState,
+        );
         this.session = {
           ...updated,
-          collectedInfo: updateCollectedInfoFromMessages(
+          collectedInfo,
+          conversationState,
+          extraInformation: updateExtraInformationFromMessages(
             updated.messages,
             updated.agentSnapshot.infoToCollect,
-            this.session.collectedInfo,
+            this.session.extraInformation ?? [],
           ),
         };
         await this.options.store.saveSession(this.session);
+        this.languageCheckSuppressed = true;
         void this.sessionLogger?.log("collected_info_updated", {
           collectedInfo: this.session.collectedInfo,
+          extraInformation: this.session.extraInformation,
+          conversationState: this.session.conversationState,
         });
       }
 
@@ -715,10 +1052,11 @@ export class VoiceConversationEngine {
       if (signal.aborted) return;
       console.error(`[${this.logPrefix}] turn error`, e);
       void this.sessionLogger?.logTurnError("turn failed", e);
-      await this.speakSentence(
-        "Sorry — I missed that. Mind saying it again?",
-        speakGenAtStart,
-      );
+      const snapshot = this.session?.agentSnapshot;
+      const clarifyPhrase = snapshot
+        ? getClarificationFallbackPhrase(snapshot)
+        : getErrorRetryPhrase(null);
+      await this.speakSentence(clarifyPhrase, speakGenAtStart);
     } finally {
       this.turnAbort = null;
       this.processingUtterance = false;
@@ -880,6 +1218,8 @@ export class VoiceConversationEngine {
     message: string,
     options?: { skipStateSet?: boolean },
   ): Promise<void> {
+    this.inactivityFired = true;
+    this.clearInactivityTimer();
     if (!options?.skipStateSet) {
       this.state = "ended";
     }
@@ -904,6 +1244,7 @@ export class VoiceConversationEngine {
     }
 
     this.state = "ended";
+    this.clearInactivityTimer();
     void this.sessionLogger?.log("session_end", { reason: _reason });
     this.endpointDebouncer?.reset();
     this.bargeInCollector.reset();

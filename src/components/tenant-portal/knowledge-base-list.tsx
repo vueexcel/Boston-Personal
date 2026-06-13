@@ -27,7 +27,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { CreateKnowledgeFromFileDialog } from "@/components/tenant-portal/create-knowledge-from-file-dialog";
 import { CreateKnowledgeFromTextDialog } from "@/components/tenant-portal/create-knowledge-from-text-dialog";
+import { CreateKnowledgeFromWebsiteDialog } from "@/components/tenant-portal/create-knowledge-from-website-dialog";
 import {
   useDeleteKnowledgeBase,
   useKnowledgeBases,
@@ -66,6 +68,8 @@ export type KnowledgeBaseListProps = {
 export function KnowledgeBaseList({ tenantId }: KnowledgeBaseListProps) {
   const router = useRouter();
   const [createOpen, setCreateOpen] = React.useState(false);
+  const [createFileOpen, setCreateFileOpen] = React.useState(false);
+  const [createWebsiteOpen, setCreateWebsiteOpen] = React.useState(false);
   const [page, setPage] = React.useState(1);
   const [sortKey, setSortKey] = React.useState<SortKey>("updatedAt");
   const [sortDir, setSortDir] = React.useState<SortDir>("desc");
@@ -160,14 +164,12 @@ export function KnowledgeBaseList({ tenantId }: KnowledgeBaseListProps) {
         <CreateSourceCard
           icon={<FileText className="h-5 w-5" />}
           label="Create From File"
-          disabled
-          hint="Coming soon"
+          onClick={() => setCreateFileOpen(true)}
         />
         <CreateSourceCard
           icon={<Globe className="h-5 w-5" />}
           label="Create From Website"
-          disabled
-          hint="Coming soon"
+          onClick={() => setCreateWebsiteOpen(true)}
         />
       </div>
 
@@ -311,6 +313,20 @@ export function KnowledgeBaseList({ tenantId }: KnowledgeBaseListProps) {
         tenantId={tenantId}
         open={createOpen}
         onOpenChange={setCreateOpen}
+        onCreated={(kbId) => router.push(`/portal/knowledge/${kbId}`)}
+      />
+
+      <CreateKnowledgeFromFileDialog
+        tenantId={tenantId}
+        open={createFileOpen}
+        onOpenChange={setCreateFileOpen}
+        onCreated={(kbId) => router.push(`/portal/knowledge/${kbId}`)}
+      />
+
+      <CreateKnowledgeFromWebsiteDialog
+        tenantId={tenantId}
+        open={createWebsiteOpen}
+        onOpenChange={setCreateWebsiteOpen}
         onCreated={(kbId) => router.push(`/portal/knowledge/${kbId}`)}
       />
     </div>

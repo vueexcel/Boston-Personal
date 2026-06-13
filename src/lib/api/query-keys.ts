@@ -32,6 +32,9 @@ export const queryKeys = {
     documents: (tenantId: string, kbId: string) =>
       ["knowledgeBases", tenantId, kbId, "documents"] as const,
   },
+  routing: {
+    settings: (tenantId: string) => ["routing", tenantId, "settings"] as const,
+  },
   calls: {
     list: (
       tenantId: string,

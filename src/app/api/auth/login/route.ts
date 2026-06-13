@@ -27,7 +27,9 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const expires = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
-  const res = NextResponse.json({ ok: true });
+  const redirectTo =
+    result.user.role === "PLATFORM_ADMIN" ? "/admin" : "/portal";
+  const res = NextResponse.json({ ok: true, redirectTo });
   res.cookies.set(
     SESSION_COOKIE,
     result.sessionToken,

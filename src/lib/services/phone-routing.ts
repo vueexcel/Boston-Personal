@@ -1,13 +1,22 @@
 import { createServerSupabase } from "@/lib/db/supabase-server";
 import { agentDebugLog } from "@/lib/debug/agent-log";
-import { isTenantActive } from "@/lib/services/tenant";
+import { getTenantRoutingSettings } from "@/lib/services/tenant-routing";
+import { getTenantMetaCached } from "@/lib/services/tenant";
+import type { TenantRoutingSettingsV1 } from "@/lib/tenant-portal/routing-settings-v1";
 import { normalizeInboundToE164 } from "@/lib/utils/phone-format";
+import { parseTenantRoutingSettings } from "@/lib/services/routing-schedule";
 
 export type InboundCallResolution = {
   tenantId: string;
   agentId: string;
   phoneNumberId: string;
   e164Number: string;
+};
+
+export type InboundRoutingContext = {
+  routing: TenantRoutingSettingsV1;
+  timezone: string;
+  tenantStatus: string;
 };
 
 export type InboundRouteFailure =
@@ -18,8 +27,13 @@ export type InboundRouteFailure =
   | "db_error";
 
 export type ResolveInboundCallResult =
-  | { ok: true; resolution: InboundCallResolution }
-  | { ok: false; reason: InboundRouteFailure };
+  | { ok: true; resolution: InboundCallResolution; routing: InboundRoutingContext }
+  | {
+      ok: false;
+      reason: InboundRouteFailure;
+      tenantId?: string;
+      routing?: InboundRoutingContext;
+    };
 
 /**
  * Resolves the owning `tenant_id` for an inbound E.164 number.
@@ -65,6 +79,23 @@ async function loadActivePhoneRow(
     return { ok: false, reason: "no_phone_row" };
   }
   return { ok: true, row: data as Record<string, unknown> };
+}
+
+async function loadInboundRoutingContext(
+  tenantId: string,
+): Promise<InboundRoutingContext> {
+  const [meta, routingPayload] = await Promise.all([
+    getTenantMetaCached(tenantId),
+    getTenantRoutingSettings(tenantId),
+  ]);
+
+  const routing =
+    routingPayload?.routing ?? parseTenantRoutingSettings(undefined);
+  const timezone =
+    routingPayload?.timezone ?? meta?.timezone ?? "America/New_York";
+  const tenantStatus = meta?.status ?? "INACTIVE";
+
+  return { routing, timezone, tenantStatus };
 }
 
 /**
@@ -113,6 +144,27 @@ export async function resolveInboundCallDetailed(
     return { ok: false, reason: "db_error" };
   }
 
+  const routingContext = await loadInboundRoutingContext(tenantId);
+
+  if (routingContext.tenantStatus !== "ACTIVE") {
+    agentDebugLog({
+      location: "phone-routing.ts",
+      message: "route failed",
+      hypothesisId: "H2",
+      data: {
+        reason: "inactive_tenant",
+        toNormalized: normalized.slice(-4),
+        tenantStatus: routingContext.tenantStatus,
+      },
+    });
+    return {
+      ok: false,
+      reason: "inactive_tenant",
+      tenantId,
+      routing: routingContext,
+    };
+  }
+
   if (!agentId) {
     agentDebugLog({
       location: "phone-routing.ts",
@@ -121,17 +173,6 @@ export async function resolveInboundCallDetailed(
       data: { reason: "no_assigned_agent", toNormalized: normalized.slice(-4) },
     });
     return { ok: false, reason: "no_assigned_agent" };
-  }
-
-  const active = await isTenantActive(tenantId);
-  if (!active) {
-    agentDebugLog({
-      location: "phone-routing.ts",
-      message: "route failed",
-      hypothesisId: "H2",
-      data: { reason: "inactive_tenant", toNormalized: normalized.slice(-4) },
-    });
-    return { ok: false, reason: "inactive_tenant" };
   }
 
   const supabase = createServerSupabase();
@@ -169,6 +210,7 @@ export async function resolveInboundCallDetailed(
       phoneNumberId,
       e164Number,
     },
+    routing: routingContext,
   };
 }
 

@@ -2,7 +2,12 @@ import { Worker, type Job } from "bullmq";
 import { createBullmqConnection } from "@/lib/queue/connection";
 import { VOICE_EVENTS_QUEUE } from "@/lib/queue/queues";
 import { fetchTwilioCallPrice } from "@/lib/integrations/twilio-recordings";
-import { extractCallCollectedInfo } from "@/lib/services/call-collected-info";
+import {
+  extractCallCollectedInfo,
+  extractExtraCallInformation,
+  mergeExtraInformation,
+} from "@/lib/services/call-collected-info";
+import { parseExtraInformation } from "@/lib/services/call-metadata";
 import { getAgentForTenant } from "@/lib/services/agents";
 import {
   dispositionLabel,
@@ -102,6 +107,28 @@ async function processInboundCompleted(
             metadataPatch.collectedInfo = collectedInfo;
             metadataPatch.collectedInfoExtractedAt =
               new Date().toISOString();
+          }
+          try {
+            const sessionExtras = parseExtraInformation(meta);
+            const extracted = await extractExtraCallInformation(
+              transcript,
+              infoToCollect,
+            );
+            const merged = mergeExtraInformation(
+              sessionExtras,
+              extracted,
+            );
+            if (merged.length > 0) {
+              metadataPatch.extraInformation = merged;
+              metadataPatch.extraInformationExtractedAt =
+                new Date().toISOString();
+            }
+          } catch (e) {
+            console.error("[voice-events] extra-info extraction failed", e);
+            const sessionExtras = parseExtraInformation(meta);
+            if (sessionExtras.length > 0) {
+              metadataPatch.extraInformation = sessionExtras;
+            }
           }
         }
       } catch (e) {

@@ -262,6 +262,39 @@ export function CallDetailSheet({
               </div>
             )}
 
+            {call.extraInformation.length > 0 && (
+              <div className="space-y-2">
+                <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+                  Extra information
+                </h3>
+                <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        <th className="px-4 py-2">Detail</th>
+                        <th className="px-4 py-2">Value</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {call.extraInformation.map((item) => (
+                        <tr
+                          key={item.label}
+                          className="border-b border-slate-100 last:border-0"
+                        >
+                          <td className="px-4 py-2 font-medium text-slate-700">
+                            {item.label}
+                          </td>
+                          <td className="px-4 py-2 text-slate-800">
+                            {item.value}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-2">
               <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
                 Sentiment

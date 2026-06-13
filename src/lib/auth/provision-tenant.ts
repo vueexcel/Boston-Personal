@@ -23,7 +23,7 @@ export async function provisionTenantForUser(
 
   const tenant = await queryOne<{ id: string }>(
     `INSERT INTO public.tenants (external_id, account_name, status, plan_code, settings)
-     VALUES ($1, $2, 'ACTIVE', 'VOICE_AI_STARTER', '{}'::jsonb)
+     VALUES ($1, $2, 'ACTIVE', 'PACKAGE_1', '{}'::jsonb)
      RETURNING id`,
     [extId, acct],
   );

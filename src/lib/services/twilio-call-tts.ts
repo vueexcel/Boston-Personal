@@ -1,6 +1,7 @@
 import { getElevenLabsClient } from "@/lib/integrations/elevenlabs";
 import { toElevenLabsTtsLanguageCode } from "@/lib/integrations/elevenlabs-flash-v25-languages";
 import { getServerEnv } from "@/lib/env/server";
+import { prepareTextForTts } from "@/lib/voice/tts-text";
 import {
   getElevenLabsTtsModel,
   getVoiceTuningConfig,
@@ -40,22 +41,31 @@ export async function streamCallSpeechMulaw(
     throw new Error("ELEVENLABS_API_KEY is not configured");
   }
 
-  const trimmed = text.trim();
-  if (!trimmed) {
+  const prepared = prepareTextForTts(text);
+  if (!prepared) {
     throw new Error("TTS text is empty");
   }
 
   const tuning = getVoiceTuningConfig();
   const speed = Math.max(0.7, Math.min(1.2, tuning.ttsSpeed));
+  const stability = Math.max(0, Math.min(1, tuning.ttsStability));
+  const similarityBoost = Math.max(0, Math.min(1, tuning.ttsSimilarityBoost));
+  const style = Math.max(0, Math.min(1, tuning.ttsStyle));
 
   const client = getElevenLabsClient();
   const body = await client.textToSpeech.convert(voiceId, {
-    text: trimmed,
+    text: prepared,
     modelId: getElevenLabsTtsModel(),
     languageCode: toElevenLabsTtsLanguageCode(language),
     outputFormat: "ulaw_8000",
+    applyTextNormalization: "auto",
+    optimizeStreamingLatency: tuning.ttsStreamingLatency,
     voiceSettings: {
       speed,
+      stability,
+      similarityBoost,
+      style,
+      useSpeakerBoost: tuning.ttsUseSpeakerBoost,
     },
   });
 

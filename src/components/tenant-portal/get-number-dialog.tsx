@@ -21,7 +21,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  useAvailablePhoneNumberCountries,
   useAvailablePhoneNumbers,
   useProvisionPhoneNumber,
 } from "@/hooks/use-phone-numbers";
@@ -30,7 +29,8 @@ import { formatPhoneNumberDisplay } from "@/lib/utils/phone-format";
 import { ApiClientError } from "@/lib/api/http";
 import { cn } from "@/lib/utils";
 
-const DEFAULT_NUMBER_TYPES: AvailablePhoneNumberType[] = ["local"];
+const US_COUNTRY_CODE = "US";
+const US_NUMBER_TYPES: AvailablePhoneNumberType[] = ["local"];
 
 type GetNumberDialogProps = {
   tenantId: string;
@@ -87,7 +87,6 @@ export function GetNumberDialog({
   open,
   onOpenChange,
 }: GetNumberDialogProps) {
-  const [country, setCountry] = React.useState("US");
   const [numberType, setNumberType] =
     React.useState<AvailablePhoneNumberType>("local");
   const [areaCode, setAreaCode] = React.useState("");
@@ -99,30 +98,7 @@ export function GetNumberDialog({
 
   const provisionMutation = useProvisionPhoneNumber(tenantId);
 
-  const {
-    data: countries = [],
-    isLoading: countriesLoading,
-    error: countriesError,
-  } = useAvailablePhoneNumberCountries(tenantId, open);
-
-  const selectedCountryMeta = React.useMemo(
-    () => countries.find((c) => c.countryCode === country),
-    [countries, country],
-  );
-
-  const availableTypes = React.useMemo(
-    () => selectedCountryMeta?.numberTypes ?? DEFAULT_NUMBER_TYPES,
-    [selectedCountryMeta?.numberTypes],
-  );
-
-  React.useEffect(() => {
-    if (!open || countries.length === 0) return;
-    const hasCurrent = countries.some((c) => c.countryCode === country);
-    if (!hasCurrent) {
-      const us = countries.find((c) => c.countryCode === "US");
-      setCountry(us?.countryCode ?? countries[0]!.countryCode);
-    }
-  }, [open, countries, country]);
+  const availableTypes = US_NUMBER_TYPES;
 
   React.useEffect(() => {
     if (!availableTypes.includes(numberType)) {
@@ -130,16 +106,15 @@ export function GetNumberDialog({
     }
   }, [availableTypes, numberType]);
 
-  const showAreaCode =
-    (country === "US" || country === "CA") && numberType === "local";
+  const showAreaCode = numberType === "local";
 
   const searchParams = React.useMemo(
     () => ({
-      country,
+      country: US_COUNTRY_CODE,
       areaCode: showAreaCode ? areaCode.trim() : "",
       numberType,
     }),
-    [country, areaCode, numberType, showAreaCode],
+    [areaCode, numberType, showAreaCode],
   );
 
   const {
@@ -187,13 +162,6 @@ export function GetNumberDialog({
     }
   };
 
-  const countriesMessage =
-    countriesError instanceof ApiClientError
-      ? countriesError.message
-      : countriesError instanceof Error
-        ? countriesError.message
-        : null;
-
   const searchMessage =
     searchError instanceof ApiClientError
       ? searchError.message
@@ -209,7 +177,7 @@ export function GetNumberDialog({
             Get a phone number
           </DialogTitle>
           <p className="text-sm font-normal text-slate-500">
-            Search live inventory from Twilio for your country and number type.
+            Search live US phone number inventory from Twilio.
           </p>
         </DialogHeader>
 
@@ -217,35 +185,12 @@ export function GetNumberDialog({
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 lg:items-end">
             <div className="space-y-1.5 sm:col-span-2">
               <Label htmlFor="get-number-country">Country</Label>
-              <Select
-                value={country}
-                onValueChange={setCountry}
-                disabled={countriesLoading || countries.length === 0}
-              >
-                <SelectTrigger
-                  id="get-number-country"
-                  className="border-slate-200 bg-white"
-                >
-                  <SelectValue
-                    placeholder={
-                      countriesLoading ? "Loading countries…" : "Select country"
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent className="max-h-72">
-                  {countries.map((c) => (
-                    <SelectItem key={c.countryCode} value={c.countryCode}>
-                      {c.country} ({c.countryCode})
-                      {c.beta ? " · beta" : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {countriesMessage ? (
-                <p className="text-xs text-red-600" role="alert">
-                  {countriesMessage}
-                </p>
-              ) : null}
+              <Input
+                id="get-number-country"
+                readOnly
+                value="United States (US)"
+                className="border-slate-200 bg-slate-50 text-slate-700"
+              />
             </div>
 
             <div className="space-y-1.5">
@@ -296,7 +241,7 @@ export function GetNumberDialog({
               type="button"
               className="bg-indigo-600 text-white hover:bg-indigo-700 lg:col-span-4 lg:max-w-[200px] lg:justify-self-end"
               onClick={runSearch}
-              disabled={isFetching || countriesLoading}
+              disabled={isFetching}
             >
               {isFetching ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -317,8 +262,8 @@ export function GetNumberDialog({
             <div className="max-h-72 overflow-y-auto">
               {!searchEnabled ? (
                 <p className="px-4 py-8 text-center text-sm text-slate-500">
-                  Choose a country and click Search numbers to load available
-                  inventory from Twilio.
+                  Click Search numbers to load available US inventory from
+                  Twilio.
                 </p>
               ) : isFetching && numbers.length === 0 ? (
                 <p className="flex items-center justify-center gap-2 px-4 py-8 text-sm text-slate-500">
@@ -331,8 +276,8 @@ export function GetNumberDialog({
                 </p>
               ) : numbers.length === 0 ? (
                 <p className="px-4 py-6 text-sm text-slate-500">
-                  No numbers found for {selectedCountryMeta?.country ?? country}{" "}
-                  ({NUMBER_TYPE_LABELS[numberType]}
+                  No numbers found for United States (
+                  {NUMBER_TYPE_LABELS[numberType]}
                   {showAreaCode && areaCode ? `, area ${areaCode}` : ""}). Try
                   another area code or number type.
                 </p>

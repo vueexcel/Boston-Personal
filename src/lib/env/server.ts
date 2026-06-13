@@ -27,6 +27,8 @@ const serverEnvSchema = z.object({
   ELEVENLABS_STT_AUDIO_FORMAT: z.string().min(1).optional(),
   PORTAL_TENANT_DISPLAY_ID: z.string().min(1).optional(),
   PORTAL_ACCOUNT_STATUS: z.enum(["ACTIVE", "INACTIVE"]).optional(),
+  /** E.164 for BOSTEL_SUPPORT routing fallback (optional). */
+  BOSTEL_SUPPORT_E164: z.string().min(1).optional(),
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;

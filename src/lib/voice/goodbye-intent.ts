@@ -5,17 +5,31 @@ const GOODBYE_PATTERNS: RegExp[] = [
   /\b(that'?s\s+all|that\s+is\s+all)\b/i,
   /\b(i'?m\s+done|im\s+done|all\s+done)\b/i,
   /\b(hang\s+up|end\s+(the\s+)?call)\b/i,
+  /\bcut\s+(the\s+)?call\b/i,
+  /\bdisconnect\b/i,
+  /\bend\s+this\b/i,
+  /\bwe'?re\s+done\b/i,
+  /\bi'?m\s+good\b/i,
   /\b(nothing\s+else|no\s+thanks|no\s+thank\s+you)\b/i,
   /\bhave\s+a\s+(good|nice)\s+(day|one)\b/i,
 ];
 
 const DEFAULT_FAREWELL = "Thanks for calling. Goodbye.";
 
+function normalizeForGoodbyeMatch(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[,;]/g, " ")
+    .replace(/\s+/g, " ");
+}
+
 /**
  * Detects caller intent to end the phone conversation.
  */
 function matchesGoodbyePhrase(text: string): boolean {
-  return GOODBYE_PATTERNS.some((re) => re.test(text));
+  const normalized = normalizeForGoodbyeMatch(text);
+  return GOODBYE_PATTERNS.some((re) => re.test(normalized));
 }
 
 export function isGoodbyeIntent(transcript: string): boolean {
@@ -26,7 +40,6 @@ export function isGoodbyeIntent(transcript: string): boolean {
     return matchesGoodbyePhrase(text);
   }
 
-  // Long snowballed transcripts: only treat the final clause as goodbye intent.
   const clauses = text
     .split(/[.!?]+/)
     .map((s) => s.trim())

@@ -1,4 +1,4 @@
-import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api/http";
+import { apiDelete, apiFetch, apiGet, apiPatch, apiPost } from "@/lib/api/http";
 import type {
   KnowledgeBaseDetail,
   KnowledgeBaseSummary,
@@ -41,6 +41,36 @@ export async function createKnowledgeBase(
   const data = await apiPost<{ knowledgeBase: KnowledgeBaseDetail }>(
     kbPath(tenantId),
     body,
+  );
+  return data.knowledgeBase;
+}
+
+export async function createKnowledgeBaseFromFile(
+  tenantId: string,
+  params: { file: File; name?: string },
+): Promise<KnowledgeBaseDetail> {
+  const fd = new FormData();
+  fd.set("file", params.file);
+  if (params.name?.trim()) {
+    fd.set("name", params.name.trim());
+  }
+  const data = await apiFetch<{ knowledgeBase: KnowledgeBaseDetail }>(
+    `${kbPath(tenantId)}/from-file`,
+    { method: "POST", body: fd },
+  );
+  return data.knowledgeBase;
+}
+
+export async function createKnowledgeBaseFromWebsite(
+  tenantId: string,
+  params: { url: string; name?: string },
+): Promise<KnowledgeBaseDetail> {
+  const data = await apiPost<{ knowledgeBase: KnowledgeBaseDetail }>(
+    `${kbPath(tenantId)}/from-website`,
+    {
+      url: params.url,
+      ...(params.name?.trim() ? { name: params.name.trim() } : {}),
+    },
   );
   return data.knowledgeBase;
 }

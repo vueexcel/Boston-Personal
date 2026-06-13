@@ -9,9 +9,31 @@ import {
   type SafetyIssue,
 } from "@/lib/services/prompt-content-safety";
 
-export type { KnowledgeDocument } from "@/lib/services/knowledge-documents.shared";
+export type {
+  KnowledgeDocument,
+  KnowledgeDocumentSourceMeta,
+} from "@/lib/services/knowledge-documents.shared";
 export { documentContentSnippet } from "@/lib/services/knowledge-documents.shared";
-import type { KnowledgeDocument } from "@/lib/services/knowledge-documents.shared";
+import type {
+  KnowledgeDocument,
+  KnowledgeDocumentSourceMeta,
+} from "@/lib/services/knowledge-documents.shared";
+
+const DOC_SELECT =
+  "id, tenant_id, knowledge_base_id, content, source_type, source_meta, created_at, updated_at";
+
+function mapSourceMeta(raw: unknown): KnowledgeDocumentSourceMeta | null {
+  if (raw == null || typeof raw !== "object") return null;
+  const obj = raw as Record<string, unknown>;
+  const meta: KnowledgeDocumentSourceMeta = {};
+  if (typeof obj.section === "string") meta.section = obj.section;
+  if (typeof obj.originalFileName === "string") {
+    meta.originalFileName = obj.originalFileName;
+  }
+  if (typeof obj.sourceUrl === "string") meta.sourceUrl = obj.sourceUrl;
+  if (typeof obj.sortOrder === "number") meta.sortOrder = obj.sortOrder;
+  return Object.keys(meta).length > 0 ? meta : null;
+}
 
 function mapDocRow(row: Record<string, unknown>): KnowledgeDocument | null {
   const id = row.id;
@@ -35,6 +57,7 @@ function mapDocRow(row: Record<string, unknown>): KnowledgeDocument | null {
     content,
     sourceType:
       typeof row.source_type === "string" ? row.source_type : "text",
+    sourceMeta: mapSourceMeta(row.source_meta),
     createdAt:
       typeof createdAt === "string"
         ? createdAt
@@ -65,9 +88,7 @@ export async function listKnowledgeDocuments(
   const supabase = createServerSupabase();
   const { data, error } = await supabase
     .from("knowledge_documents")
-    .select(
-      "id, tenant_id, knowledge_base_id, content, source_type, created_at, updated_at",
-    )
+    .select(DOC_SELECT)
     .eq("tenant_id", tenantId)
     .eq("knowledge_base_id", kbId)
     .is("deleted_at", null)
@@ -93,9 +114,7 @@ export async function getKnowledgeDocument(
   const supabase = createServerSupabase();
   const { data, error } = await supabase
     .from("knowledge_documents")
-    .select(
-      "id, tenant_id, knowledge_base_id, content, source_type, created_at, updated_at",
-    )
+    .select(DOC_SELECT)
     .eq("tenant_id", tenantId)
     .eq("knowledge_base_id", kbId)
     .eq("id", docId)
@@ -119,9 +138,25 @@ export async function createKnowledgeDocumentForBase(
   kbId: string,
   body: CreateKnowledgeDocumentBody,
 ): Promise<KnowledgeDocumentMutationResult> {
+  return createKnowledgeDocumentWithMeta(tenantId, kbId, {
+    content: body.content,
+    sourceType: "text",
+    sourceMeta: null,
+  });
+}
+
+export async function createKnowledgeDocumentWithMeta(
+  tenantId: string,
+  kbId: string,
+  params: {
+    content: string;
+    sourceType: "text" | "file" | "website";
+    sourceMeta: KnowledgeDocumentSourceMeta | null;
+  },
+): Promise<KnowledgeDocumentMutationResult> {
   await assertKnowledgeBaseExists(tenantId, kbId);
 
-  const safety = await assertContentSafeForKnowledgeDocument(body.content);
+  const safety = await assertContentSafeForKnowledgeDocument(params.content);
   const warnings = safety.issues.filter((i) => i.severity === "warning");
 
   const supabase = createServerSupabase();
@@ -130,12 +165,11 @@ export async function createKnowledgeDocumentForBase(
     .insert({
       tenant_id: tenantId,
       knowledge_base_id: kbId,
-      content: body.content.trim(),
-      source_type: "text",
+      content: params.content.trim(),
+      source_type: params.sourceType,
+      source_meta: params.sourceMeta,
     })
-    .select(
-      "id, tenant_id, knowledge_base_id, content, source_type, created_at, updated_at",
-    )
+    .select(DOC_SELECT)
     .single();
 
   if (error || !data) {
@@ -166,9 +200,7 @@ export async function updateKnowledgeDocument(
     .eq("knowledge_base_id", kbId)
     .eq("id", docId)
     .is("deleted_at", null)
-    .select(
-      "id, tenant_id, knowledge_base_id, content, source_type, created_at, updated_at",
-    )
+    .select(DOC_SELECT)
     .maybeSingle();
 
   if (error) {

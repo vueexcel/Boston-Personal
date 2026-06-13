@@ -1,4 +1,7 @@
-import type { CollectedInfoItem } from "@/lib/services/call-collected-info";
+import type {
+  CollectedInfoItem,
+  ExtraInformationItem,
+} from "@/lib/services/call-collected-info";
 import type { CallChatMessage } from "@/lib/services/twilio-call-agent";
 import type { CallSentiment } from "@/lib/services/openai-agent";
 
@@ -108,6 +111,31 @@ export function getMetadataCollectedInfo(
   metadata: Record<string, unknown> | null | undefined,
 ): CollectedInfoItem[] {
   return parseCollectedInfo(metadata);
+}
+
+export function parseExtraInformation(
+  metadata: Record<string, unknown> | null | undefined,
+): ExtraInformationItem[] {
+  if (!metadata) return [];
+  const raw = metadata.extraInformation;
+  if (!Array.isArray(raw)) return [];
+  const items: ExtraInformationItem[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const o = entry as Record<string, unknown>;
+    const label = typeof o.label === "string" ? o.label.trim() : "";
+    const value = typeof o.value === "string" ? o.value.trim() : "";
+    if (label && value) {
+      items.push({ label, value });
+    }
+  }
+  return items;
+}
+
+export function getMetadataExtraInformation(
+  metadata: Record<string, unknown> | null | undefined,
+): ExtraInformationItem[] {
+  return parseExtraInformation(metadata);
 }
 
 export function dispositionLabel(

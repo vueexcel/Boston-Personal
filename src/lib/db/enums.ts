@@ -8,6 +8,8 @@ export const userRoleSchema = z.enum([
   "SUPPORT",
 ]);
 
+export type UserRole = z.infer<typeof userRoleSchema>;
+
 export const tenantStatusSchema = z.enum(["ACTIVE", "INACTIVE", "SUSPENDED"]);
 
 export const overagePolicySchema = z.enum(["BLOCK", "ALLOW_WITH_ALERT"]);

@@ -315,10 +315,20 @@ export function ProductionVoiceCall({
               text,
             );
           }
-          setTranscript((prev) => [
-            ...prev,
-            { id: `${role}-${Date.now()}-${prev.length}`, role, text },
-          ]);
+          setTranscript((prev) => {
+            const last = prev[prev.length - 1];
+            if (
+              last &&
+              last.role === role &&
+              last.text.trim() === text.trim()
+            ) {
+              return prev;
+            }
+            return [
+              ...prev,
+              { id: `${role}-${Date.now()}-${prev.length}`, role, text },
+            ];
+          });
         }
       };
 

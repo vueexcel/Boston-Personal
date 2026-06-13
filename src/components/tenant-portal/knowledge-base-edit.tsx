@@ -172,6 +172,33 @@ export function KnowledgeBaseEdit({ tenantId, kbId }: KnowledgeBaseEditProps) {
     }
   };
 
+  const sortedDocuments = React.useMemo(() => {
+    const copy = [...documents];
+    copy.sort((a, b) => {
+      const aOrder = a.sourceMeta?.sortOrder;
+      const bOrder = b.sourceMeta?.sortOrder;
+      if (aOrder != null && bOrder != null) return aOrder - bOrder;
+      if (aOrder != null) return -1;
+      if (bOrder != null) return 1;
+      return (
+        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+      );
+    });
+    return copy;
+  }, [documents]);
+
+  const importedSource = React.useMemo(() => {
+    for (const doc of documents) {
+      if (doc.sourceType === "file" && doc.sourceMeta?.originalFileName) {
+        return { type: "file" as const, label: doc.sourceMeta.originalFileName };
+      }
+      if (doc.sourceType === "website" && doc.sourceMeta?.sourceUrl) {
+        return { type: "website" as const, label: doc.sourceMeta.sourceUrl };
+      }
+    }
+    return null;
+  }, [documents]);
+
   if (kbLoading) {
     return (
       <p className="flex items-center gap-2 text-sm text-slate-500">
@@ -189,7 +216,7 @@ export function KnowledgeBaseEdit({ tenantId, kbId }: KnowledgeBaseEditProps) {
     );
   }
 
-  const docCount = documents.length;
+  const docCount = sortedDocuments.length;
 
   return (
     <div className="space-y-6">
@@ -258,6 +285,19 @@ export function KnowledgeBaseEdit({ tenantId, kbId }: KnowledgeBaseEditProps) {
             </p>
           ) : null}
 
+          {importedSource ? (
+            <p className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+              Imported from{" "}
+              <span className="break-all font-medium text-slate-900">
+                {importedSource.label}
+              </span>
+              {importedSource.type === "website"
+                ? " (website)"
+                : null}
+              . Review each section below and edit as needed.
+            </p>
+          ) : null}
+
           <div className="border-t border-slate-100 pt-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -283,6 +323,7 @@ export function KnowledgeBaseEdit({ tenantId, kbId }: KnowledgeBaseEditProps) {
               <Table>
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
+                    <TableHead className="w-[200px]">Title</TableHead>
                     <TableHead>Content</TableHead>
                     <TableHead className="w-[180px] text-right">
                       Actions
@@ -292,24 +333,27 @@ export function KnowledgeBaseEdit({ tenantId, kbId }: KnowledgeBaseEditProps) {
                 <TableBody>
                   {docsLoading ? (
                     <TableRow>
-                      <TableCell colSpan={2} className="py-8 text-center">
+                      <TableCell colSpan={3} className="py-8 text-center">
                         <Loader2 className="mx-auto h-5 w-5 animate-spin text-slate-400" />
                       </TableCell>
                     </TableRow>
-                  ) : documents.length === 0 ? (
+                  ) : sortedDocuments.length === 0 ? (
                     <TableRow>
                       <TableCell
-                        colSpan={2}
+                        colSpan={3}
                         className="py-8 text-center text-sm text-slate-500"
                       >
                         No documents yet.
                       </TableCell>
                     </TableRow>
                   ) : (
-                    documents.map((doc) => (
+                    sortedDocuments.map((doc) => (
                       <TableRow key={doc.id}>
-                        <TableCell className="max-w-md truncate text-slate-700">
-                          &quot;{documentContentSnippet(doc.content, 80)}&quot;
+                        <TableCell className="font-medium text-slate-900">
+                          {doc.sourceMeta?.section ?? "Document"}
+                        </TableCell>
+                        <TableCell className="max-w-md truncate text-slate-600">
+                          {documentContentSnippet(doc.content, 80)}
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="inline-flex gap-2">
@@ -360,7 +404,11 @@ export function KnowledgeBaseEdit({ tenantId, kbId }: KnowledgeBaseEditProps) {
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>
-              {editingDoc ? "Edit document" : "New document"}
+              {editingDoc
+                ? editingDoc.sourceMeta?.section
+                  ? `Edit: ${editingDoc.sourceMeta.section}`
+                  : "Edit document"
+                : "New document"}
             </DialogTitle>
             <DialogDescription>
               Paste or edit the text the agent can use as reference.

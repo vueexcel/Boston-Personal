@@ -10,6 +10,12 @@ export type VoiceTuningConfig = {
   postEndpointDelayMs: number;
   ttsFrameDelayMs: number;
   ttsSpeed: number;
+  ttsStability: number;
+  ttsSimilarityBoost: number;
+  ttsStyle: number;
+  ttsUseSpeakerBoost: boolean;
+  ttsStreamingLatency: number;
+  callerInactivitySec: number;
 };
 
 function parseFloatEnv(key: string, fallback: number): number {
@@ -39,11 +45,17 @@ export function getVoiceTuningConfig(): VoiceTuningConfig {
     partialStabilityMin: parseFloatEnv("VOICE_PARTIAL_STABILITY_MIN", 0.85),
     bargeInMinChars: parseIntEnv("VOICE_BARGE_IN_MIN_CHARS", 12),
     bargeInOnlyFinal: parseBoolEnv("VOICE_BARGE_IN_ONLY_FINAL", true),
-    endpointSilenceMs: parseIntEnv("VOICE_ENDPOINT_SILENCE_MS", 1000),
+    endpointSilenceMs: parseIntEnv("VOICE_ENDPOINT_SILENCE_MS", 1300),
     endpointMinChars: parseIntEnv("VOICE_ENDPOINT_MIN_CHARS", 2),
     postEndpointDelayMs: parseIntEnv("VOICE_POST_ENDPOINT_DELAY_MS", 300),
-    ttsFrameDelayMs: parseIntEnv("VOICE_TTS_FRAME_DELAY_MS", 23),
-    ttsSpeed: parseFloatEnv("VOICE_TTS_SPEED", 0.9),
+    ttsFrameDelayMs: parseIntEnv("VOICE_TTS_FRAME_DELAY_MS", 10),
+    ttsSpeed: parseFloatEnv("VOICE_TTS_SPEED", 0.95),
+    ttsStability: parseFloatEnv("VOICE_TTS_STABILITY", 0.5),
+    ttsSimilarityBoost: parseFloatEnv("VOICE_TTS_SIMILARITY_BOOST", 0.75),
+    ttsStyle: parseFloatEnv("VOICE_TTS_STYLE", 0),
+    ttsUseSpeakerBoost: parseBoolEnv("VOICE_TTS_USE_SPEAKER_BOOST", true),
+    ttsStreamingLatency: parseIntEnv("VOICE_TTS_STREAMING_LATENCY", 0),
+    callerInactivitySec: parseIntEnv("VOICE_CALLER_INACTIVITY_SEC", 30),
   };
 }
 

@@ -13,6 +13,11 @@ export type CollectedInfoItem = {
 
 export type CollectedInfoMap = Record<string, string | null>;
 
+export type ExtraInformationItem = {
+  label: string;
+  value: string;
+};
+
 const collectedInfoItemSchema = z.object({
   field: z.string(),
   value: z.string().nullable(),
@@ -21,6 +26,15 @@ const collectedInfoItemSchema = z.object({
 
 const extractionResponseSchema = z.object({
   items: z.array(collectedInfoItemSchema),
+});
+
+const extraInformationItemSchema = z.object({
+  label: z.string(),
+  value: z.string(),
+});
+
+const extraExtractionResponseSchema = z.object({
+  items: z.array(extraInformationItemSchema),
 });
 
 function emptyCollectedMap(fields: string[]): CollectedInfoMap {
@@ -237,4 +251,181 @@ export function collectedMapFromItems(
 
 export function initialCollectedMap(fields: string[]): CollectedInfoMap {
   return emptyCollectedMap(fields);
+}
+
+const EXTRA_HEURISTIC_PATTERNS: { label: string; re: RegExp }[] = [
+  {
+    label: "Do not call preference",
+    re: /\b(?:don'?t|do not|never)\s+call\b[^.!?]{0,80}/i,
+  },
+  {
+    label: "Callback time preference",
+    re: /\b(?:call\s+(?:me\s+)?back\s+tomorrow|callback\s+tomorrow|call\s+me\s+(?:back\s+)?(?:tomorrow|after|before|at|around))[^.!?]{0,80}/i,
+  },
+  {
+    label: "Callback time preference",
+    re: /\b(?:call\s+me\s+(?:after|before|at|around)|callback\s+(?:after|before|at))\b[^.!?]{0,80}/i,
+  },
+  {
+    label: "Location",
+    re: /\b(?:i'?m\s+(?:from|in|at)|located\s+in|based\s+in)\s+([^.!?]{2,60})/i,
+  },
+  {
+    label: "Availability constraint",
+    re: /\b(?:only\s+available|not\s+available|busy\s+(?:on|after|before|until))\b[^.!?]{0,80}/i,
+  },
+  {
+    label: "Children accompanying",
+    re: /\b(?:bring(?:ing)?\s+(?:two\s+)?(?:child(?:ren)?|kids?)|child(?:ren)?\s+(?:named?|called?))[^.!?]{0,100}/i,
+  },
+  {
+    label: "Companion names",
+    re: /\b(?:named?|called?)\s+([A-Z][a-z]+(?:\s+and\s+[A-Z][a-z]+)+)/,
+  },
+];
+
+function normalizeExtraLabel(label: string): string {
+  return label.trim().toLowerCase();
+}
+
+function mergeExtraItems(
+  existing: ExtraInformationItem[],
+  incoming: ExtraInformationItem[],
+): ExtraInformationItem[] {
+  const map = new Map<string, ExtraInformationItem>();
+  for (const item of existing) {
+    const value = item.value.trim();
+    if (!value) continue;
+    map.set(normalizeExtraLabel(item.label), {
+      label: item.label.trim(),
+      value,
+    });
+  }
+  for (const item of incoming) {
+    const label = item.label.trim();
+    const value = item.value.trim();
+    if (!label || !value) continue;
+    map.set(normalizeExtraLabel(label), { label, value });
+  }
+  return Array.from(map.values());
+}
+
+/**
+ * Heuristic in-call capture of unsolicited caller facts.
+ */
+export function updateExtraInformationFromMessages(
+  messages: CallChatMessage[],
+  configuredFields: string[],
+  existing: ExtraInformationItem[] = [],
+): ExtraInformationItem[] {
+  const configured = new Set(
+    configuredFields.map((f) => normalizeFieldKey(f)),
+  );
+  const found: ExtraInformationItem[] = [];
+
+  const userLines = messages
+    .filter((m) => m.role === "user")
+    .map((m) => m.content.trim())
+    .filter(Boolean);
+
+  for (const line of userLines) {
+    for (const { label, re } of EXTRA_HEURISTIC_PATTERNS) {
+      if (configured.has(normalizeFieldKey(label))) continue;
+      const match = line.match(re);
+      if (!match) continue;
+      const value = cleanExtractedValue(match[0] ?? match[1] ?? "");
+      if (value) {
+        found.push({ label, value });
+      }
+    }
+  }
+
+  return mergeExtraItems(existing, found);
+}
+
+const EXTRACT_EXTRA_SYSTEM = `You extract unsolicited caller facts from a phone call transcript.
+Return JSON only: { "items": [ { "label": string, "value": string } ] }
+- Capture callback preferences, location, do-not-call times, constraints, and other useful facts
+- Do NOT duplicate fields already listed in configured fields
+- Use short descriptive labels (e.g. "Callback preference", "Location")
+- Omit items with empty values
+- Only include facts clearly stated by the caller`;
+
+/**
+ * Post-call open-ended extraction for call history.
+ */
+export async function extractExtraCallInformation(
+  transcript: string,
+  configuredFields: string[],
+): Promise<ExtraInformationItem[]> {
+  const trimmed = transcript.trim();
+  if (!trimmed) return [];
+
+  const env = getServerEnv();
+  if (!env.OPENAI_API_KEY?.trim()) {
+    throw new Error("OPENAI_API_KEY is not configured");
+  }
+
+  const client = getOpenAIClient();
+  const model = env.OPENAI_MODEL?.trim() || "gpt-4o-mini";
+  const configuredList =
+    configuredFields.length > 0
+      ? configuredFields.map((f) => `- ${f}`).join("\n")
+      : "(none)";
+
+  const completion = await client.chat.completions.create({
+    model,
+    temperature: 0.1,
+    response_format: { type: "json_object" },
+    messages: [
+      { role: "system", content: EXTRACT_EXTRA_SYSTEM },
+      {
+        role: "user",
+        content: `Configured COLLECT fields (exclude from extra information):\n${configuredList}\n\nTranscript:\n${trimmed}`,
+      },
+    ],
+  });
+
+  const raw = completion.choices[0]?.message?.content;
+  if (!raw) {
+    throw new Error("OpenAI returned empty extra-information extraction");
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    throw new Error("Extra-information extraction was not valid JSON");
+  }
+
+  const result = extraExtractionResponseSchema.safeParse(parsed);
+  if (!result.success) {
+    throw new Error(
+      `Extra-information extraction failed validation: ${result.error.message}`,
+    );
+  }
+
+  const configured = new Set(
+    configuredFields.map((f) => normalizeFieldKey(f)),
+  );
+
+  return result.data.items
+    .map((item) => ({
+      label: item.label.trim(),
+      value: item.value.trim(),
+    }))
+    .filter(
+      (item) =>
+        item.label &&
+        item.value &&
+        !configured.has(normalizeFieldKey(item.label)),
+    );
+}
+
+/** Merge post-call extras with in-call session extras (session wins on label conflict). */
+export function mergeExtraInformation(
+  sessionExtras: ExtraInformationItem[],
+  extracted: ExtraInformationItem[],
+): ExtraInformationItem[] {
+  return mergeExtraItems(extracted, sessionExtras);
 }

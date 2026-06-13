@@ -15,8 +15,14 @@ function defaultTuning(): VoiceTuningConfig {
     endpointSilenceMs: 1000,
     endpointMinChars: 2,
     postEndpointDelayMs: 300,
-    ttsFrameDelayMs: 23,
-    ttsSpeed: 0.9,
+    ttsFrameDelayMs: 10,
+    ttsSpeed: 0.95,
+    ttsStability: 0.5,
+    ttsSimilarityBoost: 0.75,
+    ttsStyle: 0,
+    ttsUseSpeakerBoost: true,
+    ttsStreamingLatency: 0,
+    callerInactivitySec: 30,
   };
 }
 

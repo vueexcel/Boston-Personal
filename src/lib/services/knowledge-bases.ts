@@ -1,4 +1,13 @@
 import { createServerSupabase } from "@/lib/db/supabase-server";
+import { extractKnowledgeFromSourceText } from "@/lib/services/knowledge-file-extraction";
+import { parseKnowledgeFile } from "@/lib/services/knowledge-file-parser";
+import {
+  crawlWebsite,
+  parseWebsiteUrl,
+  scrapedPagesToPlainText,
+} from "@/lib/services/website-scraper";
+import { createKnowledgeDocumentWithMeta } from "@/lib/services/knowledge-documents";
+import { ContentSafetyViolationError } from "@/lib/services/prompt-content-safety";
 import { assertContentSafeForKnowledgeDocument } from "@/lib/services/prompt-content-safety";
 import type {
   CreateKnowledgeBaseBody,
@@ -213,6 +222,159 @@ export async function updateKnowledgeBase(
   const updated = await getKnowledgeBase(tenantId, kbId);
   if (!updated) throw new Error("Knowledge base not found");
   return updated;
+}
+
+function fileNameStem(fileName: string): string {
+  const base = fileName.replace(/\\/g, "/").split("/").pop() ?? fileName;
+  const dot = base.lastIndexOf(".");
+  return dot > 0 ? base.slice(0, dot) : base;
+}
+
+export type CreateKnowledgeBaseFromFileParams = {
+  buffer: Buffer;
+  fileName: string;
+  mimeType: string;
+  name?: string | null;
+};
+
+export async function createKnowledgeBaseFromFile(
+  tenantId: string,
+  params: CreateKnowledgeBaseFromFileParams,
+): Promise<KnowledgeBaseDetail> {
+  const parsed = await parseKnowledgeFile({
+    buffer: params.buffer,
+    fileName: params.fileName,
+    mimeType: params.mimeType,
+  });
+
+  const extraction = await extractKnowledgeFromSourceText(
+    parsed.text,
+    parsed.fileName,
+  );
+
+  const kbName =
+    params.name?.trim() ||
+    extraction.suggestedName?.trim() ||
+    fileNameStem(parsed.fileName).trim() ||
+    "Imported knowledge base";
+
+  const supabase = createServerSupabase();
+  const { data, error } = await supabase
+    .from("knowledge_bases")
+    .insert({
+      tenant_id: tenantId,
+      name: kbName,
+      description: extraction.suggestedDescription?.trim() || null,
+    })
+    .select("id, tenant_id, name, description, created_at, updated_at")
+    .single();
+
+  if (error || !data) {
+    throw new Error(
+      `Failed to create knowledge base: ${error?.message ?? "unknown"}`,
+    );
+  }
+
+  const kbId = String(data.id);
+
+  try {
+    for (const doc of extraction.documents) {
+      await createKnowledgeDocumentWithMeta(tenantId, kbId, {
+        content: doc.content,
+        sourceType: "file",
+        sourceMeta: {
+          section: doc.section,
+          originalFileName: parsed.fileName,
+          sortOrder: doc.sortOrder,
+        },
+      });
+    }
+  } catch (e) {
+    await softDeleteKnowledgeBase(tenantId, kbId);
+    if (e instanceof ContentSafetyViolationError) throw e;
+    const message = e instanceof Error ? e.message : "Document creation failed";
+    throw new Error(message);
+  }
+
+  const created = await getKnowledgeBase(tenantId, kbId);
+  if (!created) {
+    throw new Error("Knowledge base created but could not be loaded");
+  }
+  return created;
+}
+
+function hostnameFromUrl(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "Imported website";
+  }
+}
+
+export type CreateKnowledgeBaseFromWebsiteParams = {
+  url: string;
+  name?: string | null;
+};
+
+export async function createKnowledgeBaseFromWebsite(
+  tenantId: string,
+  params: CreateKnowledgeBaseFromWebsiteParams,
+): Promise<KnowledgeBaseDetail> {
+  const siteUrl = parseWebsiteUrl(params.url);
+  const pages = await crawlWebsite(siteUrl);
+  const text = scrapedPagesToPlainText(pages);
+
+  const extraction = await extractKnowledgeFromSourceText(text, siteUrl);
+
+  const kbName =
+    params.name?.trim() ||
+    extraction.suggestedName?.trim() ||
+    hostnameFromUrl(siteUrl) ||
+    "Imported knowledge base";
+
+  const supabase = createServerSupabase();
+  const { data, error } = await supabase
+    .from("knowledge_bases")
+    .insert({
+      tenant_id: tenantId,
+      name: kbName,
+      description: extraction.suggestedDescription?.trim() || null,
+    })
+    .select("id, tenant_id, name, description, created_at, updated_at")
+    .single();
+
+  if (error || !data) {
+    throw new Error(
+      `Failed to create knowledge base: ${error?.message ?? "unknown"}`,
+    );
+  }
+
+  const kbId = String(data.id);
+
+  try {
+    for (const doc of extraction.documents) {
+      await createKnowledgeDocumentWithMeta(tenantId, kbId, {
+        content: doc.content,
+        sourceType: "website",
+        sourceMeta: {
+          section: doc.section,
+          sourceUrl: siteUrl,
+          sortOrder: doc.sortOrder,
+        },
+      });
+    }
+  } catch (e) {
+    await softDeleteKnowledgeBase(tenantId, kbId);
+    if (e instanceof ContentSafetyViolationError) throw e;
+    const message = e instanceof Error ? e.message : "Document creation failed";
+    throw new Error(message);
+  }
+
+  const created = await getKnowledgeBase(tenantId, kbId);
+  if (!created) {
+    throw new Error("Knowledge base created but could not be loaded");
+  }
+  return created;
 }
 
 export async function softDeleteKnowledgeBase(

@@ -1,26 +1,27 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import {
   createColumnHelper,
   flexRender,
   getCoreRowModel,
   useReactTable,
 } from "@tanstack/react-table";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Loader2, MoreHorizontal, RefreshCw, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
-import { Switch } from "@/components/ui/switch";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -29,161 +30,155 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Separator } from "@/components/ui/separator";
-import { tenantStatusSchema } from "@/lib/db/schema";
-import type { z } from "zod";
+import type { AdminTenantListRow } from "@/lib/services/platform-tenants";
+import type { ApiEnvelope } from "@/types/api";
+import { useAdminPlanLabels } from "@/hooks/use-admin-plan-labels";
 
-type TenantStatus = z.infer<typeof tenantStatusSchema>;
+const columnHelper = createColumnHelper<AdminTenantListRow>();
 
-export type AdminTenantRow = {
-  tenantId: string;
-  displayTenantId: string;
-  accountName: string;
-  status: TenantStatus;
-  planCode: string;
-  agentCount: number;
-  maxAgents: number;
-  maxPhoneNumbers: number;
-};
-
-const FALLBACK_WARNING =
-  "Fallback behavior applies: inbound calls will follow inactive-tenant routing (e.g. voicemail or alternate destination) instead of live AI agents.";
-
-function confirmInactive(): boolean {
-  if (typeof window === "undefined") return true;
-  return window.confirm(
-    `${FALLBACK_WARNING}\n\nSet this tenant to Inactive?`,
-  );
+function statusBadgeVariant(
+  status: AdminTenantListRow["status"],
+): "success" | "warning" | "muted" {
+  if (status === "ACTIVE") return "success";
+  if (status === "SUSPENDED") return "warning";
+  return "muted";
 }
 
-const MOCK_TENANTS: AdminTenantRow[] = [
-  {
-    tenantId: "cltenant001acme",
-    displayTenantId: "TEN-10025",
-    accountName: "Acme Plumbing Co.",
-    status: "ACTIVE",
-    planCode: "VOICE_AI_PRO",
-    agentCount: 4,
-    maxAgents: 10,
-    maxPhoneNumbers: 5,
-  },
-  {
-    tenantId: "cltenant002beta",
-    displayTenantId: "TEN-10026",
-    accountName: "Beta Dental Group",
-    status: "INACTIVE",
-    planCode: "VOICE_AI_PRO",
-    agentCount: 2,
-    maxAgents: 5,
-    maxPhoneNumbers: 3,
-  },
-  {
-    tenantId: "cltenant003gamma",
-    displayTenantId: "TEN-10027",
-    accountName: "Gamma Legal LLP",
-    status: "ACTIVE",
-    planCode: "VOICE_AI_STARTER",
-    agentCount: 1,
-    maxAgents: 3,
-    maxPhoneNumbers: 2,
-  },
-];
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
 
-const columnHelper = createColumnHelper<AdminTenantRow>();
+async function fetchTenants(params: {
+  search: string;
+  status: string;
+  page: number;
+}): Promise<{ tenants: AdminTenantListRow[]; total: number }> {
+  const qs = new URLSearchParams();
+  if (params.search) qs.set("search", params.search);
+  if (params.status && params.status !== "ALL") qs.set("status", params.status);
+  qs.set("page", String(params.page));
+  qs.set("limit", "25");
+
+  const res = await fetch(`/api/admin/tenants?${qs.toString()}`, {
+    credentials: "same-origin",
+  });
+  const body = (await res.json()) as ApiEnvelope<{
+    tenants: AdminTenantListRow[];
+    total: number;
+  }>;
+  if (!body.success) throw new Error(body.error?.message ?? "Failed to load tenants");
+  return body.data;
+}
 
 export function TenantManagement() {
-  const [tenants, setTenants] = React.useState<AdminTenantRow[]>(MOCK_TENANTS);
-  const [sheetOpen, setSheetOpen] = React.useState(false);
-  const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const router = useRouter();
+  const [search, setSearch] = React.useState("");
+  const [debouncedSearch, setDebouncedSearch] = React.useState("");
+  const [statusFilter, setStatusFilter] = React.useState("ALL");
+  const [page, setPage] = React.useState(1);
 
-  const selected = React.useMemo(
-    () => tenants.find((t) => t.tenantId === selectedId) ?? null,
-    [tenants, selectedId],
-  );
+  React.useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => window.clearTimeout(t);
+  }, [search]);
 
-  const patchTenant = React.useCallback(
-    (tenantId: string, patch: Partial<AdminTenantRow>) => {
-      setTenants((prev) =>
-        prev.map((t) => (t.tenantId === tenantId ? { ...t, ...patch } : t)),
-      );
-    },
-    [],
-  );
+  React.useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, statusFilter]);
 
-  const requestStatus = React.useCallback(
-    (tenantId: string, next: TenantStatus) => {
-      if (next === "INACTIVE") {
-        if (!confirmInactive()) return;
-      }
-      patchTenant(tenantId, { status: next });
-    },
-    [patchTenant],
-  );
+  const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
+    queryKey: ["admin-tenants", debouncedSearch, statusFilter, page],
+    queryFn: () =>
+      fetchTenants({ search: debouncedSearch, status: statusFilter, page }),
+  });
+
+  const { labelFor } = useAdminPlanLabels();
+
+  const tenants = data?.tenants ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / 25));
 
   const columns = React.useMemo(
     () => [
       columnHelper.accessor("accountName", {
-        header: "Account name",
+        header: "Tenant name",
         cell: (info) => (
           <span className="font-medium text-foreground">{info.getValue()}</span>
         ),
       }),
-      columnHelper.accessor("displayTenantId", {
-        header: "Tenant ID",
+      columnHelper.accessor("companyName", {
+        header: "Company",
         cell: (info) => (
-          <Badge variant="outline" className="font-mono">
-            {info.getValue()}
+          <span className="text-muted-foreground">
+            {info.getValue() || "—"}
+          </span>
+        ),
+      }),
+      columnHelper.accessor("planCode", {
+        header: "Plan",
+        cell: (info) => (
+          <Badge variant="secondary" className="text-xs">
+            {labelFor(info.getValue())}
           </Badge>
         ),
       }),
       columnHelper.accessor("status", {
         header: "Status",
         cell: (info) => {
-          const row = info.row.original;
           const status = info.getValue();
-          const active = status === "ACTIVE";
-          const label =
-            status === "SUSPENDED"
-              ? "Suspended"
-              : active
-                ? "Active"
-                : "Inactive";
           return (
-            <div
-              className="flex items-center gap-2"
-              onClick={(e) => e.stopPropagation()}
-              onKeyDown={(e) => e.stopPropagation()}
-            >
-              <Switch
-                checked={active}
-                onCheckedChange={(checked) =>
-                  requestStatus(row.tenantId, checked ? "ACTIVE" : "INACTIVE")
-                }
-                aria-label={`Toggle active for ${row.accountName}`}
-              />
-              <Badge variant={active ? "success" : "muted"}>{label}</Badge>
-            </div>
+            <Badge variant={statusBadgeVariant(status)}>
+              {status === "ACTIVE"
+                ? "Active"
+                : status === "SUSPENDED"
+                  ? "Suspended"
+                  : "Inactive"}
+            </Badge>
           );
         },
       }),
-      columnHelper.accessor("planCode", {
-        header: "Plan",
-        cell: (info) => (
-          <Badge variant="secondary" className="font-mono text-xs">
-            {info.getValue()}
-          </Badge>
-        ),
-      }),
-      columnHelper.accessor("agentCount", {
-        header: "Agents",
-        cell: (info) => (
-          <span className="tabular-nums text-muted-foreground">
-            {info.getValue()}
+      columnHelper.display({
+        id: "usage",
+        header: "Usage (30d)",
+        cell: ({ row }) => (
+          <span className="tabular-nums text-sm text-muted-foreground">
+            {row.original.callCount.toLocaleString()} calls ·{" "}
+            {row.original.minutesUsed30d.toLocaleString()} min
           </span>
         ),
       }),
+      columnHelper.accessor("createdAt", {
+        header: "Created",
+        cell: (info) => (
+          <span className="text-sm text-muted-foreground">
+            {formatDate(info.getValue())}
+          </span>
+        ),
+      }),
+      columnHelper.display({
+        id: "actions",
+        header: "",
+        cell: ({ row }) => (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label={`View ${row.original.accountName}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              router.push(`/admin/tenants/${row.original.tenantId}`);
+            }}
+          >
+            <MoreHorizontal className="h-4 w-4" />
+          </Button>
+        ),
+      }),
     ],
-    [requestStatus],
+    [router, labelFor],
   );
 
   const table = useReactTable({
@@ -192,232 +187,158 @@ export function TenantManagement() {
     getCoreRowModel: getCoreRowModel(),
   });
 
-  const openSheet = (tenantId: string) => {
-    setSelectedId(tenantId);
-    setSheetOpen(true);
-  };
-
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">
           Tenant management
         </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Platform admin view — entitlements and tenant status (demo data).
+        <p className="mt-1 text-sm text-muted-foreground">
+          View and manage all customer tenants on the platform.
         </p>
       </div>
 
       <Card>
-        <CardHeader className="pb-3">
+        <CardHeader className="flex flex-col gap-4 pb-3 sm:flex-row sm:items-center sm:justify-between">
           <CardTitle className="text-base">Tenants</CardTitle>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative min-w-[200px] flex-1 sm:max-w-xs">
+              <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Search tenants…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-[140px]">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">All statuses</SelectItem>
+                <SelectItem value="ACTIVE">Active</SelectItem>
+                <SelectItem value="INACTIVE">Inactive</SelectItem>
+                <SelectItem value="SUSPENDED">Suspended</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              aria-label="Refresh"
+              onClick={() => void refetch()}
+              disabled={isFetching}
+            >
+              <RefreshCw
+                className={isFetching ? "h-4 w-4 animate-spin" : "h-4 w-4"}
+              />
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="p-0 sm:p-0">
-          <div className="rounded-md border border-border overflow-x-auto">
-            <Table>
-              <TableHeader>
-                {table.getHeaderGroups().map((hg) => (
-                  <TableRow key={hg.id} className="hover:bg-transparent">
-                    {hg.headers.map((header) => (
-                      <TableHead key={header.id}>
-                        {header.isPlaceholder
-                          ? null
-                          : flexRender(
-                              header.column.columnDef.header,
-                              header.getContext(),
-                            )}
-                      </TableHead>
-                    ))}
-                  </TableRow>
-                ))}
-              </TableHeader>
-              <TableBody>
-                {table.getRowModel().rows.length ? (
-                  table.getRowModel().rows.map((row) => (
-                    <TableRow
-                      key={row.id}
-                      className="cursor-pointer"
-                      data-state={selectedId === row.original.tenantId && sheetOpen ? "selected" : undefined}
-                      onClick={() => openSheet(row.original.tenantId)}
-                    >
-                      {row.getVisibleCells().map((cell) => (
-                        <TableCell key={cell.id}>
-                          {flexRender(
-                            cell.column.columnDef.cell,
-                            cell.getContext(),
-                          )}
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  ))
-                ) : (
-                  <TableRow>
-                    <TableCell
-                      colSpan={columns.length}
-                      className="h-24 text-center text-muted-foreground"
-                    >
-                      No tenants.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Sheet
-        open={sheetOpen}
-        onOpenChange={(open) => {
-          setSheetOpen(open);
-          if (!open) setSelectedId(null);
-        }}
-      >
-        <SheetContent className="flex flex-col gap-0 overflow-y-auto sm:max-w-lg">
-          {selected ? (
+          {isLoading ? (
+            <div className="flex h-48 items-center justify-center">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : isError ? (
+            <div className="p-6 text-sm text-destructive">
+              {(error as Error).message}
+            </div>
+          ) : (
             <>
-              <SheetHeader className="space-y-1 pb-2">
-                <SheetTitle className="pr-6">{selected.accountName}</SheetTitle>
-                <SheetDescription className="flex flex-wrap items-center gap-2">
-                  <Badge variant="outline" className="font-mono">
-                    {selected.displayTenantId}
-                  </Badge>
-                  <span className="text-muted-foreground">·</span>
-                  <span className="font-mono text-xs text-muted-foreground">
-                    {selected.tenantId}
-                  </span>
-                </SheetDescription>
-              </SheetHeader>
-
-              <div className="space-y-6 py-4">
-                <section className="space-y-3">
-                  <h3 className="text-sm font-medium text-foreground">
-                    Entitlements
-                  </h3>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label htmlFor="max_agents">max_agents</Label>
-                      <Input
-                        id="max_agents"
-                        type="number"
-                        min={0}
-                        value={selected.maxAgents}
-                        onChange={(e) =>
-                          patchTenant(selected.tenantId, {
-                            maxAgents: Math.max(
-                              0,
-                              Number.parseInt(e.target.value, 10) || 0,
-                            ),
-                          })
-                        }
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="max_phone_numbers">
-                        max_phone_numbers
-                      </Label>
-                      <Input
-                        id="max_phone_numbers"
-                        type="number"
-                        min={0}
-                        value={selected.maxPhoneNumbers}
-                        onChange={(e) =>
-                          patchTenant(selected.tenantId, {
-                            maxPhoneNumbers: Math.max(
-                              0,
-                              Number.parseInt(e.target.value, 10) || 0,
-                            ),
-                          })
-                        }
-                      />
-                    </div>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Maps to tenant entitlement limits in Postgres (
-                    <code className="rounded bg-muted px-1 py-0.5">maxAgents</code>
-                    ,{" "}
-                    <code className="rounded bg-muted px-1 py-0.5">
-                      maxPhoneNumbers
-                    </code>
-                    ).
-                  </p>
-                </section>
-
-                <Separator />
-
-                <section className="space-y-4">
-                  <h3 className="text-sm font-medium text-foreground">
-                    Status control
-                  </h3>
-                  <div
-                    className="flex flex-col gap-4 rounded-lg border border-border bg-muted/30 p-4"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-4">
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium leading-none">
-                          Tenant active
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          When off, the tenant is inactive and fallback routing
-                          applies.
-                        </p>
-                      </div>
-                      <Switch
-                        className="h-7 w-12 scale-110 data-[state=checked]:bg-primary"
-                        checked={selected.status === "ACTIVE"}
-                        onCheckedChange={(checked) => {
-                          if (!checked && !confirmInactive()) return;
-                          patchTenant(
-                            selected.tenantId,
-                            {
-                              status: checked ? "ACTIVE" : "INACTIVE",
-                            },
-                          );
-                        }}
-                        aria-label="Toggle tenant active status"
-                      />
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-muted-foreground">Status:</span>
-                      <Badge
-                        variant={
-                          selected.status === "ACTIVE" ? "success" : "muted"
-                        }
-                      >
-                        {selected.status === "ACTIVE"
-                          ? "Active"
-                          : selected.status === "SUSPENDED"
-                            ? "Suspended"
-                            : "Inactive"}
-                      </Badge>
-                    </div>
-                  </div>
-
-                  {selected.status !== "ACTIVE" ? (
-                    <Alert variant="warning">
-                      <AlertTitle>Fallback behavior</AlertTitle>
-                      <AlertDescription>{FALLBACK_WARNING}</AlertDescription>
-                    </Alert>
-                  ) : null}
-                </section>
-
-                <Separator />
-
-                <div className="flex justify-end gap-2">
+              <div className="overflow-x-auto rounded-md border border-border">
+                <Table>
+                  <TableHeader>
+                    {table.getHeaderGroups().map((hg) => (
+                      <TableRow key={hg.id} className="hover:bg-transparent">
+                        {hg.headers.map((header) => (
+                          <TableHead key={header.id}>
+                            {header.isPlaceholder
+                              ? null
+                              : flexRender(
+                                  header.column.columnDef.header,
+                                  header.getContext(),
+                                )}
+                          </TableHead>
+                        ))}
+                      </TableRow>
+                    ))}
+                  </TableHeader>
+                  <TableBody>
+                    {table.getRowModel().rows.length ? (
+                      table.getRowModel().rows.map((row) => (
+                        <TableRow
+                          key={row.id}
+                          className="cursor-pointer"
+                          onClick={() =>
+                            router.push(
+                              `/admin/tenants/${row.original.tenantId}`,
+                            )
+                          }
+                        >
+                          {row.getVisibleCells().map((cell) => (
+                            <TableCell key={cell.id}>
+                              {flexRender(
+                                cell.column.columnDef.cell,
+                                cell.getContext(),
+                              )}
+                            </TableCell>
+                          ))}
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow>
+                        <TableCell
+                          colSpan={columns.length}
+                          className="h-24 text-center text-muted-foreground"
+                        >
+                          No tenants found.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+              <div className="flex items-center justify-between border-t border-border px-4 py-3">
+                <p className="text-xs text-muted-foreground">
+                  {total.toLocaleString()} tenant{total === 1 ? "" : "s"}
+                </p>
+                <div className="flex items-center gap-2">
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => setSheetOpen(false)}
+                    size="sm"
+                    disabled={page <= 1}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
                   >
-                    Close
+                    Previous
+                  </Button>
+                  <span className="text-xs text-muted-foreground">
+                    Page {page} of {totalPages}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={page >= totalPages}
+                    onClick={() => setPage((p) => p + 1)}
+                  >
+                    Next
                   </Button>
                 </div>
               </div>
             </>
-          ) : null}
-        </SheetContent>
-      </Sheet>
+          )}
+        </CardContent>
+      </Card>
+
+      <p className="text-xs text-muted-foreground">
+        Click a row to open the full tenant profile.{" "}
+        <Link href="/admin" className="underline underline-offset-2">
+          Back to dashboard
+        </Link>
+      </p>
     </div>
   );
 }

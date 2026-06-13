@@ -10,6 +10,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import pg from "pg";
+import { seedPlatformAdmin } from "./seed-platform-admin";
 
 const MIGRATIONS_DIR = path.join(process.cwd(), "supabase", "migrations");
 
@@ -81,6 +82,8 @@ async function main(): Promise<void> {
       process.exit(1);
     }
   }
+
+  await seedPlatformAdmin(client);
 
   await client.end();
   console.log("migrations complete");

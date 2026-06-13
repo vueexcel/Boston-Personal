@@ -1,6 +1,10 @@
 import { randomBytes } from "crypto";
 import { getRedis } from "@/lib/cache/redis";
-import type { CollectedInfoMap } from "@/lib/services/call-collected-info";
+import type {
+  CollectedInfoMap,
+  ExtraInformationItem,
+} from "@/lib/services/call-collected-info";
+import type { CallConversationState } from "@/lib/services/call-conversation-state";
 import { initialCollectedMap } from "@/lib/services/call-collected-info";
 import type {
   CallAgentSnapshot,
@@ -20,6 +24,8 @@ export type TestCallSession = {
   greetingPlayed: boolean;
   expiresAt: string;
   collectedInfo?: CollectedInfoMap;
+  extraInformation?: ExtraInformationItem[];
+  conversationState?: CallConversationState;
 };
 
 const TEST_SESSION_TTL_SEC = 10 * 60;
@@ -47,6 +53,8 @@ export function toVoiceConversationSession(
     collectedInfo:
       session.collectedInfo ??
       initialCollectedMap(session.agentSnapshot.infoToCollect),
+    extraInformation: session.extraInformation ?? [],
+    conversationState: session.conversationState,
   };
 }
 

@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import {
+  buildRoutingFallbackTwiML,
   inactiveTenantTwiML,
 } from "@/lib/voice/twiml-fallback";
 import { inboundMediaStreamTwiML, spokenMessageTwiML } from "@/lib/voice/twiml-stream";
@@ -15,6 +16,7 @@ import {
   inboundRouteFailureMessage,
   resolveInboundCallDetailed,
 } from "@/lib/services/phone-routing";
+import { isWithinBusinessHours } from "@/lib/services/routing-schedule";
 import { normalizeInboundToE164 } from "@/lib/utils/phone-format";
 import { createCallRecordTransact } from "@/lib/services/calls";
 import { loadCallAgentContext } from "@/lib/services/twilio-call-agent";
@@ -134,11 +136,48 @@ export async function POST(request: Request): Promise<Response> {
         toSuffix: normalizeInboundToE164(to).slice(-4),
       },
     });
+    if (
+      !routeResult.ok &&
+      routeResult.reason === "inactive_tenant" &&
+      routeResult.routing
+    ) {
+      finish("inactive-fallback", { reason });
+      return twimlResponse(
+        buildRoutingFallbackTwiML(
+          routeResult.routing.routing.inactiveFallback,
+        ),
+      );
+    }
     finish("route-failed", { reason });
     return twimlResponse(spokenMessageTwiML(inboundRouteFailureMessage(reason)));
   }
 
   const resolution = routeResult.resolution;
+  const routingContext = routeResult.routing;
+
+  if (
+    routingContext.routing.businessHours.enabled &&
+    !isWithinBusinessHours(
+      routingContext.routing,
+      routingContext.timezone,
+    )
+  ) {
+    agentDebugLog({
+      location: "voice/route.ts:after-hours",
+      message: "after-hours fallback",
+      hypothesisId: "H2",
+      data: {
+        tenantIdPrefix: resolution.tenantId.slice(0, 8),
+        timezone: routingContext.timezone,
+      },
+    });
+    finish("after-hours-fallback");
+    return twimlResponse(
+      buildRoutingFallbackTwiML(
+        routingContext.routing.afterHoursFallback,
+      ),
+    );
+  }
 
   try {
     const agentSnapshot = await loadCallAgentContext(
