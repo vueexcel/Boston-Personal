@@ -32,6 +32,12 @@ import type { AdminTenantDetail } from "@/lib/services/platform-tenants";
 import type { ApiEnvelope } from "@/types/api";
 import { normalizeTenantPlanCode } from "@/lib/db/tenant-plans";
 import { useAdminPlanLabels } from "@/hooks/use-admin-plan-labels";
+import {
+  formatBillingHours,
+  formatUsdFromCents,
+  POSTPAID_HOURS_LIMIT,
+  type BillingUsageSummary,
+} from "@/lib/db/tenant-billing";
 
 type TenantDetailViewProps = {
   tenantId: string;
@@ -61,6 +67,62 @@ async function patchTenant(
     throw new Error(responseBody.error?.message ?? "Update failed");
   }
   return responseBody.data;
+}
+
+function formatPeriodDate(iso: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(iso));
+}
+
+function BillingUsageRows({ usage }: { usage: BillingUsageSummary }) {
+  return (
+    <>
+      <div className="flex justify-between gap-4">
+        <span className="text-muted-foreground">Billing period</span>
+        <span className="text-right font-medium">
+          {formatPeriodDate(usage.periodStart)} –{" "}
+          {formatPeriodDate(usage.periodEnd)}
+        </span>
+      </div>
+      <div className="flex justify-between">
+        <span className="text-muted-foreground">Package hours</span>
+        <span className="font-medium tabular-nums">
+          {formatBillingHours(usage.packageSecondsUsed)} /{" "}
+          {formatBillingHours(usage.packageSecondsLimit)}
+        </span>
+      </div>
+      <div className="flex justify-between">
+        <span className="text-muted-foreground">Postpaid PAYG</span>
+        <span className="font-medium tabular-nums">
+          {formatBillingHours(usage.postpaidSecondsUsed)} /{" "}
+          {formatBillingHours(usage.postpaidSecondsLimit)}
+        </span>
+      </div>
+      <div className="flex justify-between">
+        <span className="text-muted-foreground">Estimated next bill</span>
+        <span className="font-medium tabular-nums">
+          {formatUsdFromCents(usage.estimatedBillCents)}
+        </span>
+      </div>
+      {usage.lastInvoice ? (
+        <>
+          <Separator />
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Last invoice</span>
+            <span className="font-medium tabular-nums">
+              {formatUsdFromCents(usage.lastInvoice.amountCents)}
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {usage.lastInvoice.lineDescription} ·{" "}
+            {formatPeriodDate(usage.lastInvoice.createdAt)}
+          </p>
+        </>
+      ) : null}
+    </>
+  );
 }
 
 export function TenantDetailView({ tenantId }: TenantDetailViewProps) {
@@ -384,6 +446,10 @@ export function TenantDetailView({ tenantId }: TenantDetailViewProps) {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Current plan</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Plan changes apply on the next billing period; the open period
+                keeps its original package limits.
+              </p>
             </CardHeader>
             <CardContent className="space-y-4">
               <Select
@@ -435,6 +501,23 @@ export function TenantDetailView({ tenantId }: TenantDetailViewProps) {
               </div>
             </CardContent>
           </Card>
+
+          {form.billingUsage ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Billing usage</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                <p className="text-xs text-muted-foreground">
+                  Signup-anniversary monthly cycle. Package hours are included;
+                  postpaid PAYG ({POSTPAID_HOURS_LIMIT}h buffer) is invoiced for
+                  hours actually used — not the full allowance. Plan changes
+                  apply on the next period.
+                </p>
+                <BillingUsageRows usage={form.billingUsage} />
+              </CardContent>
+            </Card>
+          ) : null}
 
           <Card>
             <CardHeader>

@@ -3,7 +3,8 @@
 import * as React from "react";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
+import { parseSafeRedirectPath } from "@/lib/auth/routes";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,6 +20,8 @@ type LoginFormProps = {
   defaultRedirect?: string;
   /** When set, overrides API redirect after login. */
   forceRedirect?: string;
+  /** Allowed path prefixes for the `?redirect=` query param (e.g. `/admin`). */
+  allowedRedirectPrefixes?: readonly string[];
   showSignupLink?: boolean;
   title?: string;
   description?: string;
@@ -27,13 +30,16 @@ type LoginFormProps = {
 export function LoginForm({
   defaultRedirect = "/portal",
   forceRedirect,
+  allowedRedirectPrefixes,
   showSignupLink = true,
   title = "Welcome back",
   description = "Enter your credentials to access your workspace.",
 }: LoginFormProps) {
-  const router = useRouter();
   const searchParams = useSearchParams();
-  const redirectTo = searchParams.get("redirect") ?? defaultRedirect;
+  const redirectParam = searchParams.get("redirect");
+  const redirectPrefixes =
+    allowedRedirectPrefixes ??
+    ([defaultRedirect.split(/[?#]/)[0]].filter(Boolean) as string[]);
   const paramError = searchParams.get("error");
 
   const [email, setEmail] = React.useState("");
@@ -67,12 +73,18 @@ export function LoginForm({
       const body = (await res.json().catch(() => ({}))) as {
         redirectTo?: string;
       };
+      const safeQueryRedirect = parseSafeRedirectPath(
+        redirectParam,
+        redirectPrefixes,
+      );
       const destination =
         forceRedirect ??
+        safeQueryRedirect ??
         body.redirectTo ??
-        (redirectTo.startsWith("/") ? redirectTo : defaultRedirect);
-      router.push(destination);
-      router.refresh();
+        defaultRedirect;
+      // Full navigation ensures the new session cookie is sent and avoids stale
+      // RSC prefetch cache from pre-login visits to protected routes.
+      window.location.assign(destination);
     } catch {
       setError("Something went wrong. Please try again.");
       setSubmitting(false);

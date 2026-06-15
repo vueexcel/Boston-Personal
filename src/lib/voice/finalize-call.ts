@@ -9,6 +9,7 @@ import {
 } from "@/lib/services/calls";
 import { fetchTwilioCallInsights } from "@/lib/integrations/twilio-call-logs";
 import { enqueueInboundVoiceCompleted } from "@/lib/services/voice-events";
+import { allocateCallUsage } from "@/lib/services/tenant-billing";
 import { deleteCallSession, getCallSession } from "@/lib/voice/call-session";
 import { agentDebugLog } from "@/lib/debug/agent-log";
 
@@ -125,6 +126,22 @@ export async function finalizeInboundCall(
       skippedReason: "no_session_or_row",
       turnCount,
     };
+  }
+
+  const duration =
+    durationSeconds ?? twilioInsights?.durationSeconds ?? null;
+  if (session?.tenantId && session.callLogId && duration != null && duration > 0) {
+    try {
+      await allocateCallUsage({
+        tenantId: session.tenantId,
+        callLogId: session.callLogId,
+        durationSeconds: duration,
+        endedAt: new Date(),
+        callStatus: status,
+      });
+    } catch (e) {
+      console.warn("[finalize-call] billing allocation failed", e);
+    }
   }
 
   if (session && process.env.REDIS_URL) {

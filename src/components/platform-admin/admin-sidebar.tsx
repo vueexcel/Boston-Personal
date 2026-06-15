@@ -35,6 +35,7 @@ export function AdminSidebar({
       <div className="flex h-16 shrink-0 items-center border-b border-slate-200/90 px-6">
         <Link
           href="/admin"
+          prefetch={false}
           className="flex items-center gap-2.5 font-semibold tracking-tight text-slate-900"
           onClick={onNavigate}
         >
@@ -59,6 +60,7 @@ export function AdminSidebar({
             <Link
               key={item.href}
               href={item.href}
+              prefetch={false}
               onClick={onNavigate}
               className={cn(
                 "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900",
@@ -80,14 +82,14 @@ export function AdminSidebar({
         })}
       </nav>
       <div className="shrink-0 border-t border-slate-200/90 p-3">
-        <Link
+        <a
           href="/auth/sign-out"
           onClick={onNavigate}
           className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900"
         >
           <LogOut className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
           Sign out
-        </Link>
+        </a>
       </div>
     </div>
   );

@@ -28,6 +28,7 @@ export default function AdminLoginPage() {
       <Suspense fallback={<LoginFormFallback />}>
         <LoginForm
           defaultRedirect="/admin"
+          allowedRedirectPrefixes={["/admin"]}
           showSignupLink={false}
           title="Admin access"
           description="Use the credentials provisioned for platform administration."

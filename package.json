@@ -16,6 +16,7 @@
     "worker": "tsx --env-file=.env src/lib/queue/workers/run.ts",
     "worker:dev": "tsx watch --env-file=.env src/lib/queue/workers/run.ts",
     "db:migrate": "tsx --env-file=.env scripts/db/migrate.ts",
+    "billing:close-periods": "tsx --env-file=.env scripts/billing/close-billing-periods.ts",
     "twilio:sync-status-callbacks": "tsx --env-file=.env scripts/twilio/sync-voice-status-callbacks.ts"
   },
   "engines": {
@@ -42,6 +43,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "docx": "^9.7.1",
+    "driver.js": "^1.4.0",
     "franc": "^6.2.0",
     "ioredis": "^5.10.1",
     "lucide-react": "^1.14.0",

@@ -17,6 +17,7 @@ import {
   resolveInboundCallDetailed,
 } from "@/lib/services/phone-routing";
 import { isWithinBusinessHours } from "@/lib/services/routing-schedule";
+import { canTenantAcceptUsage } from "@/lib/services/tenant-billing";
 import { normalizeInboundToE164 } from "@/lib/utils/phone-format";
 import { createCallRecordTransact } from "@/lib/services/calls";
 import { loadCallAgentContext } from "@/lib/services/twilio-call-agent";
@@ -176,6 +177,24 @@ export async function POST(request: Request): Promise<Response> {
       buildRoutingFallbackTwiML(
         routingContext.routing.afterHoursFallback,
       ),
+    );
+  }
+
+  const usageGate = await canTenantAcceptUsage(resolution.tenantId);
+  if (!usageGate.allowed) {
+    agentDebugLog({
+      location: "voice/route.ts:usage-limit",
+      message: "usage limit reached",
+      hypothesisId: "H2",
+      data: { tenantIdPrefix: resolution.tenantId.slice(0, 8) },
+    });
+    finish("usage-limit-fallback");
+    return twimlResponse(
+      buildRoutingFallbackTwiML({
+        type: "MESSAGE",
+        message:
+          "This line has reached its usage limit for the current billing period. Please try again later or contact your account administrator.",
+      }),
     );
   }
 

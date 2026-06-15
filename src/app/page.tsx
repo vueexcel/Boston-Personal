@@ -26,7 +26,7 @@ export default function HomePage() {
       subtitle="Use the email and password for your Bostel Voice AI account."
     >
       <Suspense fallback={<LoginFormFallback />}>
-        <LoginForm />
+        <LoginForm allowedRedirectPrefixes={["/portal"]} />
       </Suspense>
     </AuthShell>
   );

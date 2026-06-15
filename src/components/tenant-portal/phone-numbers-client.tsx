@@ -94,7 +94,7 @@ export function PhoneNumbersClient({ tenantId }: PhoneNumbersClientProps) {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      <div data-tour="phone-numbers-header" className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
@@ -110,6 +110,7 @@ export function PhoneNumbersClient({ tenantId }: PhoneNumbersClientProps) {
         </div>
         <Button
           type="button"
+          data-tour="phone-numbers-get"
           className="bg-indigo-600 text-white hover:bg-indigo-700"
           onClick={() => setGetNumberOpen(true)}
         >
@@ -117,7 +118,7 @@ export function PhoneNumbersClient({ tenantId }: PhoneNumbersClientProps) {
         </Button>
       </div>
 
-      <Card className="border-slate-200 shadow-sm">
+      <Card data-tour="phone-numbers-table" className="border-slate-200 shadow-sm">
         <CardContent className="p-0">
           {isPending ? (
             <p className="flex items-center gap-2 px-6 py-10 text-sm text-slate-500">

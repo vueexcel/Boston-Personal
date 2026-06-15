@@ -148,14 +148,14 @@ export function KnowledgeBaseList({ tenantId }: KnowledgeBaseListProps) {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center gap-2">
+      <div data-tour="knowledge-header" className="flex flex-wrap items-center gap-2">
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
           Knowledge Base
         </h1>
         <Badge className="bg-slate-900 text-white hover:bg-slate-900">BETA</Badge>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div data-tour="knowledge-create" className="grid gap-3 sm:grid-cols-3">
         <CreateSourceCard
           icon={<Plus className="h-5 w-5" />}
           label="Create From Text"
@@ -173,7 +173,7 @@ export function KnowledgeBaseList({ tenantId }: KnowledgeBaseListProps) {
         />
       </div>
 
-      <Card className="border-slate-200 shadow-sm">
+      <Card data-tour="knowledge-table" className="border-slate-200 shadow-sm">
         <CardHeader className="border-b border-slate-100 py-4">
           {isPending ? (
             <p className="flex items-center gap-2 text-sm text-slate-500">

@@ -1,9 +1,14 @@
 import { z } from "zod";
 import { e164Schema } from "@/lib/db/primitives";
 import {
+  defaultRoutingHolidays,
   ROUTING_SETTINGS_VERSION,
   type TenantRoutingSettingsV1,
 } from "@/lib/tenant-portal/routing-settings-v1";
+import {
+  FEDERAL_HOLIDAY_IDS,
+  isFederalHolidayId,
+} from "@/lib/tenant-portal/us-federal-holidays";
 
 const timeHmSchema = z
   .string()
@@ -46,6 +51,69 @@ const routingFallbackSchema = z
     }
   });
 
+const monthDaySchema = z
+  .string()
+  .regex(/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/, "Expected MM-DD");
+
+const onceDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD")
+  .refine((val) => {
+    const [y, m, d] = val.split("-").map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    return (
+      dt.getUTCFullYear() === y &&
+      dt.getUTCMonth() === m - 1 &&
+      dt.getUTCDate() === d
+    );
+  }, "Invalid calendar date");
+
+export const federalHolidayIdSchema = z.enum(FEDERAL_HOLIDAY_IDS);
+
+const customHolidaySchema = z.discriminatedUnion("kind", [
+  z.object({
+    id: z.string().trim().min(1).max(64),
+    name: z.string().trim().min(2).max(80),
+    kind: z.literal("annual"),
+    monthDay: monthDaySchema,
+    enabled: z.boolean(),
+  }),
+  z.object({
+    id: z.string().trim().min(1).max(64),
+    name: z.string().trim().min(2).max(80),
+    kind: z.literal("once"),
+    date: onceDateSchema,
+    enabled: z.boolean(),
+  }),
+]);
+
+const routingHolidaysSchema = z
+  .object({
+    federalEnabled: z.boolean(),
+    federal: z.record(z.string(), z.boolean()).default({}),
+    custom: z.array(customHolidaySchema).max(50),
+  })
+  .transform((val) => {
+    const defaults = defaultRoutingHolidays();
+    const federal = { ...defaults.federal };
+    for (const [key, enabled] of Object.entries(val.federal)) {
+      if (isFederalHolidayId(key)) {
+        federal[key] = enabled;
+      }
+    }
+    const ids = new Set<string>();
+    const custom = val.custom.filter((entry) => {
+      if (ids.has(entry.id)) return false;
+      ids.add(entry.id);
+      return true;
+    });
+    return {
+      federalEnabled: val.federalEnabled,
+      federal,
+      custom,
+    };
+  });
+
 export const tenantRoutingSettingsBodySchema = z
   .object({
     businessHours: z.object({
@@ -53,6 +121,7 @@ export const tenantRoutingSettingsBodySchema = z
       weekdayStart: timeHmSchema,
       weekdayEnd: timeHmSchema,
     }),
+    holidays: routingHolidaysSchema.default(defaultRoutingHolidays()),
     afterHoursFallback: routingFallbackSchema,
     inactiveFallback: routingFallbackSchema,
   })
@@ -103,6 +172,7 @@ export function toTenantRoutingSettingsV1(
   return {
     version: ROUTING_SETTINGS_VERSION,
     businessHours: body.businessHours,
+    holidays: body.holidays,
     afterHoursFallback: body.afterHoursFallback,
     inactiveFallback: body.inactiveFallback,
   };
@@ -113,9 +183,10 @@ export function routingSettingsBodyFromV1(
 ): TenantRoutingSettingsBody {
   return {
     businessHours: settings.businessHours,
+    holidays: settings.holidays,
     afterHoursFallback: settings.afterHoursFallback,
     inactiveFallback: settings.inactiveFallback,
   };
 }
 
-export { fallbackMessageSchema };
+export { fallbackMessageSchema, customHolidaySchema };

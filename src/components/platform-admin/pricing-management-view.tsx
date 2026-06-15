@@ -363,8 +363,9 @@ export function PricingManagementView() {
                 <p className="text-xs text-destructive">{errors.paygRate}</p>
               ) : (
                 <p className="text-xs text-muted-foreground">
-                  Applied after a tenant&apos;s purchased package hours are
-                  exhausted.
+                  Charged on the next billing cycle for postpaid hours actually
+                  used (up to 30h) after package hours are exhausted — not a
+                  flat 30-hour charge.
                 </p>
               )}
             </div>

@@ -24,3 +24,18 @@ export function loginUrl(params?: Record<string, string | undefined>): string {
   const qs = search.toString();
   return qs ? `${LOGIN_PATH}?${qs}` : LOGIN_PATH;
 }
+
+/** Reject open redirects; only allow same-origin relative paths under known prefixes. */
+export function parseSafeRedirectPath(
+  value: string | null | undefined,
+  allowedPrefixes: readonly string[],
+): string | null {
+  if (!value?.startsWith("/") || value.startsWith("//") || value.includes("\\")) {
+    return null;
+  }
+  const pathname = value.split(/[?#]/)[0] ?? value;
+  const allowed = allowedPrefixes.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+  return allowed ? value : null;
+}

@@ -21,6 +21,10 @@ import {
   type PortalDashboardStats,
   type RecentInboundCallRow,
 } from "@/lib/services/portal-dashboard";
+import {
+  formatBillingHours,
+  formatUsdFromCents,
+} from "@/lib/db/tenant-billing";
 
 type PortalDashboardViewProps = {
   stats: PortalDashboardStats;
@@ -76,7 +80,7 @@ export function PortalDashboardView({
 
   return (
     <div className="space-y-8">
-      <div>
+      <div data-tour="welcome">
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
           Dashboard
         </h1>
@@ -85,7 +89,10 @@ export function PortalDashboardView({
         </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div
+        data-tour="dashboard-metrics"
+        className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"
+      >
         {metrics.map((m) => {
           const Icon = m.icon;
           return (
@@ -112,7 +119,62 @@ export function PortalDashboardView({
         })}
       </div>
 
-      <Card className="border-slate-200/90 shadow-sm">
+      {stats.billingUsage ? (
+        <Card className="border-slate-200/90 shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-lg text-slate-900">
+              Billing period usage
+            </CardTitle>
+            <CardDescription>
+              Package hours are included. Postpaid PAYG usage in this period is
+              billed on your next invoice for hours actually consumed.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                Package
+              </p>
+              <p className="mt-1 text-lg font-semibold text-slate-900">
+                {formatBillingHours(stats.billingUsage.packageSecondsUsed)} /{" "}
+                {formatBillingHours(stats.billingUsage.packageSecondsLimit)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                Postpaid PAYG
+              </p>
+              <p className="mt-1 text-lg font-semibold text-slate-900">
+                {formatBillingHours(stats.billingUsage.postpaidSecondsUsed)} /{" "}
+                {formatBillingHours(stats.billingUsage.postpaidSecondsLimit)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                Est. next bill
+              </p>
+              <p className="mt-1 text-lg font-semibold text-slate-900">
+                {formatUsdFromCents(stats.billingUsage.estimatedBillCents)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                Period ends
+              </p>
+              <p className="mt-1 text-sm font-medium text-slate-900">
+                {new Intl.DateTimeFormat(undefined, {
+                  dateStyle: "medium",
+                }).format(new Date(stats.billingUsage.periodEnd))}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <Card
+        data-tour="dashboard-recent-calls"
+        className="border-slate-200/90 shadow-sm"
+      >
         <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
           <div className="space-y-1">
             <CardTitle className="text-lg text-slate-900">

@@ -198,7 +198,7 @@ export function CallHistoryClient({ tenantId }: CallHistoryClientProps) {
         </Button>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
+      <div data-tour="call-logs-filters" className="flex flex-wrap items-center gap-3">
         <Select
           value={datePreset}
           onValueChange={(v) => setDatePreset(v as DatePreset)}
@@ -241,7 +241,10 @@ export function CallHistoryClient({ tenantId }: CallHistoryClientProps) {
         </p>
       )}
 
-      <Card className="overflow-hidden border-slate-200/90 shadow-sm">
+      <Card
+        data-tour="call-logs-table"
+        className="overflow-hidden border-slate-200/90 shadow-sm"
+      >
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>

@@ -49,9 +49,10 @@ function mapRow(row: CostingSettingsRow): CostingSettings & {
 /**
  * Platform pricing configuration (singleton row).
  *
- * Business rules (enforced by future billing, not here):
- * - Tenants purchase Package 1 or Package 2 (hours + price from this row).
- * - After purchased hours are exhausted, usage bills at paygRate per hour.
+ * Business rules (enforced by tenant billing service):
+ * - Package hours are consumed first per billing period.
+ * - After package exhaustion, up to 30h postpaid PAYG is tracked and invoiced
+ *   on the next cycle for hours actually used at paygRate.
  */
 export async function getCostingSettings(): Promise<
   CostingSettings & { createdAt: string; updatedAt: string }

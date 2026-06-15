@@ -18,6 +18,7 @@ import {
   getCallLogByProviderId,
   updateCallLogByProviderId,
 } from "@/lib/services/calls";
+import { allocateCallUsage } from "@/lib/services/tenant-billing";
 import { summarizeCall } from "@/lib/services/openai-agent";
 import { resolveInfoToCollect } from "@/lib/services/twilio-call-agent";
 
@@ -138,6 +139,23 @@ async function processInboundCompleted(
   }
 
   await updateCallLogByProviderId(providerCallId, patch);
+
+  const durationSec =
+    row.duration ??
+    (patch.callMinutes != null ? Math.round(patch.callMinutes * 60) : 0);
+  if (durationSec > 0) {
+    try {
+      await allocateCallUsage({
+        tenantId,
+        callLogId: row.callId,
+        durationSeconds: durationSec,
+        endedAt: row.endedAt ? new Date(row.endedAt) : new Date(),
+        callStatus: row.status,
+      });
+    } catch (e) {
+      console.error("[voice-events] billing allocation failed", e);
+    }
+  }
 }
 
 export function createVoiceEventsWorker(redisUrl: string): Worker {

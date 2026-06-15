@@ -1,0 +1,70 @@
+/* Bostel portal theme overrides for driver.js */
+
+.bostel-driver-popover.driver-popover {
+  background-color: #ffffff;
+  border: 1px solid rgb(226 232 240 / 0.9);
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 3px 0 rgb(15 23 42 / 0.08), 0 4px 12px -2px rgb(15 23 42 / 0.06);
+  color: rgb(51 65 85);
+  max-width: 360px;
+}
+
+.bostel-driver-popover .driver-popover-title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: rgb(15 23 42);
+  line-height: 1.4;
+}
+
+.bostel-driver-popover .driver-popover-description {
+  font-size: 0.875rem;
+  color: rgb(71 85 105);
+  line-height: 1.5;
+}
+
+.bostel-driver-popover .driver-popover-progress-text {
+  font-size: 0.75rem;
+  color: rgb(100 116 139);
+}
+
+.bostel-driver-popover .driver-popover-footer button {
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  padding: 0.375rem 0.75rem;
+  text-shadow: none;
+}
+
+.bostel-driver-popover .driver-popover-next-btn,
+.bostel-driver-popover .driver-popover-done-btn {
+  background-color: hsl(239 84% 58%);
+  border: none;
+  color: #ffffff;
+}
+
+.bostel-driver-popover .driver-popover-next-btn:hover,
+.bostel-driver-popover .driver-popover-done-btn:hover {
+  background-color: hsl(239 84% 52%);
+}
+
+.bostel-driver-popover .driver-popover-prev-btn {
+  background-color: #ffffff;
+  border: 1px solid rgb(226 232 240);
+  color: rgb(51 65 85);
+}
+
+.bostel-driver-popover .driver-popover-prev-btn:hover {
+  background-color: rgb(248 250 252);
+}
+
+.bostel-driver-popover .driver-popover-close-btn {
+  color: rgb(100 116 139);
+}
+
+.bostel-driver-popover .driver-popover-close-btn:hover {
+  color: rgb(51 65 85);
+}
+
+.bostel-driver-popover .driver-popover-arrow {
+  border-color: #ffffff;
+}

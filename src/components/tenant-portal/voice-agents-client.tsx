@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,6 +23,7 @@ import {
 import { CreateAgentWizard } from "@/components/tenant-portal/create-agent-wizard";
 import { useAgents, useDeleteAgent } from "@/hooks/use-agents";
 import { ApiClientError } from "@/lib/api/http";
+import { setPendingAgentKnowledgeTour } from "@/lib/tenant-portal/agent-knowledge-tour-storage";
 
 type VoiceAgentsClientProps = {
   tenantId: string;
@@ -34,6 +36,7 @@ function queryErrorMessage(error: unknown): string {
 }
 
 export function VoiceAgentsClient({ tenantId }: VoiceAgentsClientProps) {
+  const router = useRouter();
   const [wizardOpen, setWizardOpen] = React.useState(false);
   const [deletingId, setDeletingId] = React.useState<string | null>(null);
 
@@ -70,7 +73,10 @@ export function VoiceAgentsClient({ tenantId }: VoiceAgentsClientProps) {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div
+        data-tour="voice-agents-header"
+        className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"
+      >
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
             Voice Agents
@@ -82,6 +88,7 @@ export function VoiceAgentsClient({ tenantId }: VoiceAgentsClientProps) {
         </div>
         <Button
           type="button"
+          data-tour="voice-agents-new"
           className="shrink-0 bg-indigo-600 hover:bg-indigo-700"
           onClick={() => setWizardOpen(true)}
         >
@@ -90,7 +97,7 @@ export function VoiceAgentsClient({ tenantId }: VoiceAgentsClientProps) {
         </Button>
       </div>
 
-      <Card className="border-slate-200 shadow-sm">
+      <Card data-tour="voice-agents-table" className="border-slate-200 shadow-sm">
         <CardHeader className="pb-3">
           <CardTitle className="text-lg">Your agents</CardTitle>
           <CardDescription>
@@ -165,6 +172,10 @@ export function VoiceAgentsClient({ tenantId }: VoiceAgentsClientProps) {
         tenantId={tenantId}
         open={wizardOpen}
         onOpenChange={setWizardOpen}
+        onCreated={(agent) => {
+          setPendingAgentKnowledgeTour(agent.id);
+          router.push(`/portal/voice-agents/${agent.id}`);
+        }}
       />
     </div>
   );

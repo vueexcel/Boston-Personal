@@ -29,10 +29,13 @@ import { ApiClientError } from "@/lib/api/http";
 import {
   DEFAULT_AFTER_HOURS_MESSAGE,
   DEFAULT_INACTIVE_MESSAGE,
+  defaultRoutingHolidays,
   type FallbackType,
+  type RoutingHolidaysConfig,
   type TenantRoutingSettingsV1,
 } from "@/lib/tenant-portal/routing-settings-v1";
 import { routingSettingsBodyFromV1 } from "@/lib/validation/routing-settings";
+import { RoutingHolidaysEditor } from "@/components/tenant-portal/routing-holidays-editor";
 
 export type RoutingFlowBuilderProps = {
   tenantId: string;
@@ -42,6 +45,7 @@ type LocalFormState = {
   businessHoursEnabled: boolean;
   weekdayStart: string;
   weekdayEnd: string;
+  holidays: RoutingHolidaysConfig;
   afterHoursFallback: FallbackType;
   afterHoursMessage: string;
   afterHoursPhone: string;
@@ -59,6 +63,7 @@ function toLocalState(
     businessHoursEnabled: routing.businessHours.enabled,
     weekdayStart: routing.businessHours.weekdayStart,
     weekdayEnd: routing.businessHours.weekdayEnd,
+    holidays: routing.holidays ?? defaultRoutingHolidays(),
     afterHoursFallback: routing.afterHoursFallback.type,
     afterHoursMessage:
       routing.afterHoursFallback.message ?? DEFAULT_AFTER_HOURS_MESSAGE,
@@ -101,6 +106,7 @@ function toRoutingSettings(local: LocalFormState): TenantRoutingSettingsV1 {
       weekdayStart: local.weekdayStart,
       weekdayEnd: local.weekdayEnd,
     },
+    holidays: local.holidays,
     afterHoursFallback,
     inactiveFallback,
   };
@@ -173,13 +179,14 @@ export function RoutingFlowBuilder({ tenantId }: RoutingFlowBuilderProps) {
           Routing Flow
         </h1>
         <p className="mt-1 max-w-3xl text-sm text-slate-600 sm:text-base">
-          Configure weekday business hours and fallbacks for after-hours or
-          inactive accounts. Live voice agents connect only during business
-          hours when hours are enabled.
+          Configure weekday business hours, US federal and custom holiday
+          closures, and fallbacks for after-hours or inactive accounts. Live
+          voice agents connect only during open hours when business hours are
+          enabled.
         </p>
       </div>
 
-      <Card className="border-slate-200/90 shadow-sm">
+      <Card data-tour="routing-hours" className="border-slate-200/90 shadow-sm">
         <CardHeader className="border-b border-slate-100 bg-slate-50/50">
           <div className="flex items-start gap-3">
             <span className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
@@ -244,7 +251,16 @@ export function RoutingFlowBuilder({ tenantId }: RoutingFlowBuilderProps) {
         </CardContent>
       </Card>
 
-      <Card className="border-amber-200/80 bg-amber-50/20 shadow-sm">
+      <RoutingHolidaysEditor
+        holidays={local.holidays}
+        businessHoursEnabled={local.businessHoursEnabled}
+        onChange={(holidays) => patchLocal({ holidays })}
+      />
+
+      <Card
+        data-tour="routing-fallback"
+        className="border-amber-200/80 bg-amber-50/20 shadow-sm"
+      >
         <CardHeader className="border-b border-amber-100/80">
           <CardTitle className="text-lg text-slate-900">Fallback</CardTitle>
           <CardDescription className="text-slate-700">

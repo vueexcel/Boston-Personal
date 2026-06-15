@@ -1,3 +1,4 @@
+import type { Worker } from "bullmq";
 import { wssHost } from "@/lib/debug/agent-log";
 import {
   getTwilioMediaStreamWssUrl,
@@ -6,9 +7,14 @@ import {
 } from "@/lib/env/server";
 import { pingRedis } from "@/lib/health/redis-ping";
 import {
+  ensureBillingJobScheduler,
+  isBillingJobsEnabled,
+} from "@/lib/queue/billing-jobs-queue";
+import {
   isMediaStreamProxiedViaApp,
   startTwilioMediaStreamServer,
 } from "@/lib/voice/twilio-media-stream-server";
+import { createBillingJobsWorker } from "./billing-jobs-worker";
 import { createVoiceEventsWorker } from "./voice-events-worker";
 
 /**
@@ -49,16 +55,42 @@ async function main(): Promise<void> {
   } else {
     startTwilioMediaStreamServer();
   }
-  const worker = createVoiceEventsWorker(url);
+
+  const workers: Worker[] = [createVoiceEventsWorker(url)];
+
+  if (isBillingJobsEnabled()) {
+    if (!process.env.DATABASE_URL?.trim()) {
+      throw new Error(
+        "DATABASE_URL is required on the worker when billing jobs are enabled",
+      );
+    }
+    await ensureBillingJobScheduler();
+    workers.push(createBillingJobsWorker(url));
+  } else {
+    console.info(
+      "[billing] jobs disabled (set BILLING_JOBS_ENABLED=1 and BILLING_CLOSE_PERIODS_CRON to enable)",
+    );
+  }
 
   await new Promise<void>((resolve) => {
-    worker.on("closed", () => resolve());
-    process.on("SIGINT", () => {
-      void worker.close();
-    });
-    process.on("SIGTERM", () => {
-      void worker.close();
-    });
+    let closedCount = 0;
+    const onWorkerClosed = () => {
+      closedCount += 1;
+      if (closedCount >= workers.length) {
+        resolve();
+      }
+    };
+
+    for (const worker of workers) {
+      worker.on("closed", onWorkerClosed);
+    }
+
+    const shutdown = () => {
+      void Promise.all(workers.map((worker) => worker.close()));
+    };
+
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
   });
 }
 

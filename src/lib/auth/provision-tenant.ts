@@ -1,4 +1,5 @@
 import { query, queryOne } from "@/lib/db/postgres";
+import { ensureOpenBillingPeriod } from "@/lib/services/tenant-billing";
 
 export type ProvisionTenantResult = {
   tenantId: string;
@@ -41,6 +42,8 @@ export async function provisionTenantForUser(
      VALUES ($1, $2, 'TENANT_ADMIN')`,
     [tenant.id, userId],
   );
+
+  await ensureOpenBillingPeriod(tenant.id);
 
   return { tenantId: tenant.id, externalId: extId };
 }

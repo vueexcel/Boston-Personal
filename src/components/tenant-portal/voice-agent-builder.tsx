@@ -54,6 +54,7 @@ import {
   serializeAgentPortalConfig,
 } from "@/lib/tenant-portal/agent-config-v1";
 import { useUpdateAgent } from "@/hooks/use-agents";
+import { useAgentKnowledgeTour } from "@/hooks/use-agent-knowledge-tour";
 import { useKnowledgeBases } from "@/hooks/use-knowledge-bases";
 import {
   usePhoneNumbers,
@@ -253,9 +254,13 @@ function sectionCard(
   title: string,
   description: string,
   children: React.ReactNode,
+  dataTour?: string,
 ) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+    <div
+      className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
+      {...(dataTour ? { "data-tour": dataTour } : {})}
+    >
       <h3 className="text-base font-semibold text-slate-900">{title}</h3>
       <p className="mt-1 text-sm text-slate-600">{description}</p>
       <div className="mt-4 space-y-3">{children}</div>
@@ -335,6 +340,8 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
   const [saveError, setSaveError] = React.useState<string | null>(null);
   const [saveWarnings, setSaveWarnings] = React.useState<SafetyIssue[]>([]);
   const [activeTab, setActiveTab] = React.useState("behavior");
+
+  useAgentKnowledgeTour({ agentId: agent.id, setActiveTab });
 
   const previewLoading = previewVoiceMutation.isPending;
   const [previewError, setPreviewError] = React.useState<string | null>(null);
@@ -947,7 +954,11 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
               <TabsTrigger value="behavior" className={TAB_TRIGGER_CLASS}>
                 Behavior
               </TabsTrigger>
-              <TabsTrigger value="knowledge" className={TAB_TRIGGER_CLASS}>
+              <TabsTrigger
+                value="knowledge"
+                className={TAB_TRIGGER_CLASS}
+                data-tour="agent-knowledge-tab"
+              >
                 Knowledge
               </TabsTrigger>
               <TabsTrigger value="forwarding" className={TAB_TRIGGER_CLASS}>
@@ -1284,6 +1295,7 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
                     </Link>
                   </p>
                 </>,
+                "agent-knowledge-base",
               )}
             </TabsContent>
 

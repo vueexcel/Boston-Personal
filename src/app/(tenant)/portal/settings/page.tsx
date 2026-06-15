@@ -5,7 +5,7 @@ export const metadata: Metadata = { title: "Settings" };
 
 export default function SettingsPage() {
   return (
-    <Card className="border-slate-200/90">
+    <Card data-tour="settings-card" className="border-slate-200/90">
       <CardHeader>
         <CardTitle className="text-slate-900">Settings</CardTitle>
         <CardDescription>

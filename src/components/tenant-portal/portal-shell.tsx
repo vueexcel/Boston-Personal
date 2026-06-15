@@ -5,6 +5,7 @@ import { Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TenantSidebar } from "@/components/tenant-portal/tenant-sidebar";
 import { TenantTopBar } from "@/components/tenant-portal/tenant-top-bar";
+import { PortalTourProvider } from "@/components/tenant-portal/portal-tour-provider";
 import type { TenantPortalAccountStatus } from "@/lib/tenant-portal/demo-context";
 import { cn } from "@/lib/utils";
 
@@ -47,12 +48,16 @@ export function PortalShell({
   }, []);
 
   return (
-    <div
-      data-portal-shell
-      className="fixed inset-0 flex overflow-hidden bg-slate-50/90"
-    >
+    <PortalTourProvider openMobileNav={() => setMobileOpen(true)}>
+      <div
+        data-portal-shell
+        className="fixed inset-0 flex overflow-hidden bg-slate-50/90"
+      >
       {/* Desktop sidebar — full viewport height; nav scrolls inside if needed */}
-      <aside className="hidden h-full w-64 shrink-0 border-r border-slate-200/90 bg-white shadow-sm md:flex md:flex-col">
+      <aside
+        data-portal-desktop-sidebar
+        className="hidden h-full w-64 shrink-0 border-r border-slate-200/90 bg-white shadow-sm md:flex md:flex-col"
+      >
         <TenantSidebar />
       </aside>
 
@@ -68,6 +73,7 @@ export function PortalShell({
 
       {/* Mobile drawer */}
       <div
+        data-portal-mobile-drawer
         className={cn(
           "fixed inset-y-0 left-0 z-50 flex w-[min(18rem,100vw-2rem)] flex-col border-r border-slate-200/90 bg-white shadow-2xl transition-transform duration-200 ease-out md:hidden",
           mobileOpen ? "translate-x-0" : "-translate-x-full",
@@ -113,5 +119,6 @@ export function PortalShell({
         </main>
       </div>
     </div>
+    </PortalTourProvider>
   );
 }

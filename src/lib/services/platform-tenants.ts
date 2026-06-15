@@ -8,6 +8,8 @@ import { normalizeTenantPlanCode } from "@/lib/db/tenant-plans";
 import { tenantStatusSchema } from "@/lib/db/enums";
 import { hashPassword } from "@/lib/auth/password";
 import { refreshTenantMetaCacheAfterWrite } from "@/lib/services/tenant";
+import { getOpenPeriodSummary } from "@/lib/services/tenant-billing";
+import type { BillingUsageSummary } from "@/lib/db/tenant-billing";
 import { randomBytes } from "node:crypto";
 import type { z } from "zod";
 
@@ -35,6 +37,7 @@ export type AdminTenantDetail = AdminTenantListRow & {
   activeAgents: number;
   primaryAdminUserId: string | null;
   primaryAdminEmail: string | null;
+  billingUsage: BillingUsageSummary | null;
 };
 
 type ListDbRow = {
@@ -220,6 +223,13 @@ export async function getPlatformTenantDetail(
   const settings = parseTenantProfileSettings(row.settings);
   const primaryAdminEmail = adminUser?.email ?? null;
 
+  let billingUsage: BillingUsageSummary | null = null;
+  try {
+    billingUsage = await getOpenPeriodSummary(tenantId);
+  } catch {
+    billingUsage = null;
+  }
+
   return {
     tenantId: row.id,
     displayTenantId: row.external_id,
@@ -239,6 +249,7 @@ export async function getPlatformTenantDetail(
     activeAgents: row.active_agents,
     primaryAdminUserId: adminUser?.user_id ?? null,
     primaryAdminEmail,
+    billingUsage,
   };
 }
 

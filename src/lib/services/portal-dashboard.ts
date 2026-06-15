@@ -1,5 +1,7 @@
 import { dispositionLabel } from "@/lib/services/call-metadata";
 import { query, queryOne } from "@/lib/db/postgres";
+import type { BillingUsageSummary } from "@/lib/db/tenant-billing";
+import { getOpenPeriodSummary } from "@/lib/services/tenant-billing";
 import { formatPhoneNumberDisplay } from "@/lib/utils/phone-format";
 
 export type PortalDashboardStats = {
@@ -11,6 +13,7 @@ export type PortalDashboardStats = {
   secondsLast30Days: number;
   completedLast7Days: number;
   missedFailedLast7Days: number;
+  billingUsage: BillingUsageSummary | null;
 };
 
 export type RecentInboundCallRow = {
@@ -95,7 +98,7 @@ export function formatUtcTimestamp(iso: string): string {
 export async function getPortalDashboardStats(
   tenantId: string,
 ): Promise<PortalDashboardStats> {
-  const [callStats, agentStats] = await Promise.all([
+  const [callStats, agentStats, billingUsage] = await Promise.all([
     queryOne<CallStatsRow>(
       `SELECT
          COUNT(*)::int AS total_calls,
@@ -129,6 +132,7 @@ export async function getPortalDashboardStats(
        WHERE tenant_id = $1 AND deleted_at IS NULL`,
       [tenantId],
     ),
+    getOpenPeriodSummary(tenantId).catch(() => null),
   ]);
 
   return {
@@ -140,6 +144,7 @@ export async function getPortalDashboardStats(
     secondsLast30Days: callStats?.seconds_last_30_days ?? 0,
     completedLast7Days: callStats?.completed_last_7_days ?? 0,
     missedFailedLast7Days: callStats?.missed_failed_last_7_days ?? 0,
+    billingUsage,
   };
 }
 
