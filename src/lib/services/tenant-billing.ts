@@ -225,7 +225,7 @@ export async function ensureOpenBillingPeriod(
     if (!account) throw new Error("Failed to create billing account");
   }
 
-  let open = await getOpenPeriod(tenantId);
+  const open = await getOpenPeriod(tenantId);
   if (open) return open;
 
   const lastClosed = await queryOne<{ period_end: Date | string }>(
