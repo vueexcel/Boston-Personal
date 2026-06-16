@@ -16,6 +16,7 @@ import {
 } from "@/lib/voice/twilio-media-stream-server";
 import { createBillingJobsWorker } from "./billing-jobs-worker";
 import { createVoiceEventsWorker } from "./voice-events-worker";
+import { getTtsConfigForProfile } from "@/lib/voice/tts-config";
 
 /**
  * Long-running BullMQ worker + Twilio Media Streams WebSocket (run via `npm run worker`).
@@ -30,6 +31,11 @@ async function main(): Promise<void> {
   if (!redisPing.ok) {
     throw new Error(`Redis unavailable: ${redisPing.error}`);
   }
+
+  console.info("[bostel-voice] TTS config", {
+    telephony: getTtsConfigForProfile("telephony"),
+    browserTest: getTtsConfigForProfile("browser_test"),
+  });
 
   try {
     const wssUrl = getTwilioMediaStreamWssUrl();

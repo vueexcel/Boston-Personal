@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   buildCollectWorkflowBlock,
   buildPhoneConversationStyleBlock,
+  DEFAULT_BEHAVIOUR_RULES,
 } from "@/lib/services/prompt-assembler";
 import {
   buildVoicePersonaBlock,
@@ -32,6 +33,9 @@ describe("prompt-assembler voice blocks", () => {
     assert.ok(block.includes("# Interruption handling"));
     assert.ok(block.includes("# Repetition prevention"));
     assert.ok(block.includes("# Speech recognition uncertainty"));
+    assert.ok(block.includes("calm, professional, and conversational"));
+    assert.ok(!block.includes("warm, and human"));
+    assert.ok(block.includes('Thanks, Andrew." not "Great, Andrew!'));
   });
 
   it("buildCollectWorkflowBlock lists fields in order", () => {
@@ -43,10 +47,17 @@ describe("prompt-assembler voice blocks", () => {
     assert.ok(block.includes("Caller's Name"));
     assert.ok(block.includes("Budget"));
     assert.ok(block.includes("ONE COLLECT question per turn"));
+    assert.ok(block.includes("time or callback COLLECT field"));
   });
 
   it("buildCollectWorkflowBlock returns empty when no fields", () => {
     assert.equal(buildCollectWorkflowBlock([]), "");
+  });
+
+  it("DEFAULT_BEHAVIOUR_RULES compares caller stated day and time", () => {
+    assert.ok(DEFAULT_BEHAVIOUR_RULES.includes("STRICT HOURS & DAYS ENFORCEMENT"));
+    assert.ok(DEFAULT_BEHAVIOUR_RULES.includes("they stated"));
+    assert.ok(DEFAULT_BEHAVIOUR_RULES.includes("do not mention Sunday"));
   });
 });
 

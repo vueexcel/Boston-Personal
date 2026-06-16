@@ -1,13 +1,27 @@
 import { getElevenLabsClient } from "@/lib/integrations/elevenlabs";
+import type { TextToSpeechConvertRequestOutputFormat } from "@elevenlabs/elevenlabs-js/api";
 import { toElevenLabsTtsLanguageCode } from "@/lib/integrations/elevenlabs-flash-v25-languages";
 import { getServerEnv } from "@/lib/env/server";
 import { prepareTextForTts } from "@/lib/voice/tts-text";
 import {
-  getElevenLabsTtsModel,
-  getVoiceTuningConfig,
-} from "@/lib/voice/voice-tuning";
+  getTtsConfigForProfile,
+  getTtsMediaFormat,
+  type TtsDeliveryProfile,
+  type TtsMediaFormat,
+} from "@/lib/voice/tts-config";
+import { getVoiceTuningConfig } from "@/lib/voice/voice-tuning";
 
 const CHUNK_SIZE_BYTES = 640;
+
+export type StreamCallSpeechOptions = {
+  profile: TtsDeliveryProfile;
+  language?: string | null;
+  signal?: AbortSignal;
+};
+
+export type CallSpeechChunkMeta = {
+  format: TtsMediaFormat;
+};
 
 /**
  * Synthesizes speech as mulaw 8kHz bytes for Twilio Media Streams playback.
@@ -19,22 +33,29 @@ export async function synthesizeCallSpeechMulaw(
   signal?: AbortSignal,
 ): Promise<Buffer> {
   const chunks: Buffer[] = [];
-  await streamCallSpeechMulaw(text, voiceId, (chunk) => {
-    if (signal?.aborted) return;
-    chunks.push(chunk);
-  }, language, signal);
+  await streamCallSpeech(
+    text,
+    voiceId,
+    (chunk) => {
+      if (signal?.aborted) return;
+      chunks.push(chunk);
+    },
+    { profile: "telephony", language, signal },
+  );
   return Buffer.concat(chunks);
 }
 
 /**
- * Streams mulaw 8kHz audio chunks as ElevenLabs generates them.
+ * Streams ElevenLabs TTS audio for preview (MP3) or telephony (μ-law 8 kHz).
  */
-export async function streamCallSpeechMulaw(
+export async function streamCallSpeech(
   text: string,
   voiceId: string,
-  onChunk: (mulaw: Buffer) => void | Promise<void>,
-  language?: string | null,
-  signal?: AbortSignal,
+  onChunk: (
+    chunk: Buffer,
+    meta: CallSpeechChunkMeta,
+  ) => void | Promise<void>,
+  options: StreamCallSpeechOptions,
 ): Promise<void> {
   const env = getServerEnv();
   if (!env.ELEVENLABS_API_KEY?.trim()) {
@@ -46,39 +67,43 @@ export async function streamCallSpeechMulaw(
     throw new Error("TTS text is empty");
   }
 
-  const tuning = getVoiceTuningConfig();
-  const speed = Math.max(0.7, Math.min(1.2, tuning.ttsSpeed));
-  const stability = Math.max(0, Math.min(1, tuning.ttsStability));
-  const similarityBoost = Math.max(0, Math.min(1, tuning.ttsSimilarityBoost));
-  const style = Math.max(0, Math.min(1, tuning.ttsStyle));
-
+  const config = getTtsConfigForProfile(options.profile);
   const client = getElevenLabsClient();
-  const body = await client.textToSpeech.convert(voiceId, {
+
+  const convertParams: Parameters<typeof client.textToSpeech.convert>[1] = {
     text: prepared,
-    modelId: getElevenLabsTtsModel(),
-    languageCode: toElevenLabsTtsLanguageCode(language),
-    outputFormat: "ulaw_8000",
+    modelId: config.model,
+    languageCode: toElevenLabsTtsLanguageCode(options.language),
+    outputFormat: config.outputFormat as TextToSpeechConvertRequestOutputFormat,
     applyTextNormalization: "auto",
-    optimizeStreamingLatency: tuning.ttsStreamingLatency,
-    voiceSettings: {
-      speed,
-      stability,
-      similarityBoost,
-      style,
-      useSpeakerBoost: tuning.ttsUseSpeakerBoost,
-    },
-  });
+    optimizeStreamingLatency: config.streamingLatency,
+  };
+
+  if (config.voiceSettings) {
+    convertParams.voiceSettings = config.voiceSettings;
+  }
+
+  const body = await client.textToSpeech.convert(voiceId, convertParams);
+  const mediaFormat = getTtsMediaFormat(options.profile);
+
+  if (options.profile === "preview" || options.profile === "browser_test") {
+    const buf = await readStreamToBuffer(body, options.signal);
+    if (!options.signal?.aborted && buf.length > 0) {
+      await onChunk(buf, { format: mediaFormat });
+    }
+    return;
+  }
 
   const stream = body as ReadableStream<Uint8Array>;
   if (typeof stream.getReader === "function") {
     const reader = stream.getReader();
     try {
       while (true) {
-        if (signal?.aborted) break;
+        if (options.signal?.aborted) break;
         const { done, value } = await reader.read();
         if (done) break;
         if (value?.byteLength) {
-          await onChunk(Buffer.from(value));
+          await onChunk(Buffer.from(value), { format: mediaFormat });
         }
       }
     } finally {
@@ -88,9 +113,51 @@ export async function streamCallSpeechMulaw(
   }
 
   const buf = Buffer.from(await new Response(body).arrayBuffer());
-  if (!signal?.aborted && buf.length > 0) {
-    await onChunk(buf);
+  if (!options.signal?.aborted && buf.length > 0) {
+    await onChunk(buf, { format: mediaFormat });
   }
+}
+
+/** @deprecated Use {@link streamCallSpeech} with `profile: "telephony"`. */
+export async function streamCallSpeechMulaw(
+  text: string,
+  voiceId: string,
+  onChunk: (mulaw: Buffer) => void | Promise<void>,
+  language?: string | null,
+  signal?: AbortSignal,
+): Promise<void> {
+  await streamCallSpeech(
+    text,
+    voiceId,
+    (chunk) => onChunk(chunk),
+    { profile: "telephony", language, signal },
+  );
+}
+
+async function readStreamToBuffer(
+  body: unknown,
+  signal?: AbortSignal,
+): Promise<Buffer> {
+  const stream = body as ReadableStream<Uint8Array>;
+  if (typeof stream.getReader === "function") {
+    const reader = stream.getReader();
+    const chunks: Buffer[] = [];
+    try {
+      while (true) {
+        if (signal?.aborted) break;
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value?.byteLength) {
+          chunks.push(Buffer.from(value));
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    return Buffer.concat(chunks);
+  }
+
+  return Buffer.from(await new Response(body as BodyInit).arrayBuffer());
 }
 
 /** Splits mulaw audio into Twilio-sized base64 payload chunks. */

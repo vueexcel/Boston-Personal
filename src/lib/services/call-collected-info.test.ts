@@ -82,4 +82,22 @@ describe("call-collected-info", () => {
     );
     assert.equal(updated.Company, "Top G");
   });
+
+  it("extracts preferred callback time from natural phrasing", () => {
+    const messages = [
+      {
+        role: "user" as const,
+        content: "My preferred time is Tuesday morning, 10:00 a.m.",
+      },
+    ];
+    const updated = updateCollectedInfoFromMessages(
+      messages,
+      ["Preferred time for a callback"],
+      { "Preferred time for a callback": null },
+    );
+    assert.ok(updated["Preferred time for a callback"]?.includes("Tuesday"));
+    assert.ok(
+      updated["Preferred time for a callback"]?.includes("10:00"),
+    );
+  });
 });

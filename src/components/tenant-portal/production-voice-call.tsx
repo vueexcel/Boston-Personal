@@ -191,6 +191,44 @@ export function ProductionVoiceCall({
 
   stopPlaybackRef.current = stopPlayback;
 
+  const scheduleMp3Playback = React.useCallback(
+    async (base64Payload: string) => {
+      const ctx = audioContextRef.current;
+      if (!ctx) return;
+
+      markAgentPlaybackActive();
+
+      try {
+        const binary = atob(base64Payload);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        const audioBuffer = await ctx.decodeAudioData(bytes.buffer.slice(0));
+
+        const source = ctx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(ctx.destination);
+
+        const startAt = Math.max(ctx.currentTime, playbackTimeRef.current);
+        source.start(startAt);
+        playbackTimeRef.current = startAt + audioBuffer.duration;
+        scheduledSourcesRef.current.push(source);
+        source.onended = () => {
+          scheduledSourcesRef.current = scheduledSourcesRef.current.filter(
+            (s) => s !== source,
+          );
+          if (scheduledSourcesRef.current.length === 0) {
+            schedulePlaybackEnded();
+          }
+        };
+      } catch {
+        schedulePlaybackEnded();
+      }
+    },
+    [markAgentPlaybackActive, schedulePlaybackEnded],
+  );
+
   const scheduleMulawPlayback = React.useCallback(
     (base64Payload: string) => {
       const ctx = audioContextRef.current;
@@ -287,7 +325,7 @@ export function ProductionVoiceCall({
       ws.onmessage = (event) => {
         let msg: {
           event?: string;
-          media?: { payload?: string };
+          media?: { payload?: string; format?: "mulaw" | "mp3" };
           speak?: { text?: string };
           transcript?: { role: "user" | "assistant"; text: string };
         };
@@ -303,7 +341,11 @@ export function ProductionVoiceCall({
             msg.speak.text,
           );
         } else if (msg.event === "media" && msg.media?.payload) {
-          scheduleMulawPlayback(msg.media.payload);
+          if (msg.media.format === "mp3") {
+            void scheduleMp3Playback(msg.media.payload);
+          } else {
+            scheduleMulawPlayback(msg.media.payload);
+          }
         } else if (msg.event === "clear") {
           stopPlayback();
           agentPlaybackActiveRef.current = false;

@@ -29,7 +29,7 @@ import {
 import { getLocalizedFallbackPhrase } from "@/lib/tenant-portal/agent-greeting-defaults";
 import {
   playMulawChunks,
-  streamCallSpeechMulaw,
+  streamCallSpeech,
 } from "@/lib/services/twilio-call-tts";
 import { agentDebugLog } from "@/lib/debug/agent-log";
 import {
@@ -74,6 +74,11 @@ import {
   shouldUseLanguageReprompt,
 } from "@/lib/voice/utterance-language";
 import { getVoiceTuningConfig } from "@/lib/voice/voice-tuning";
+import {
+  getTtsConfigForProfile,
+  type TtsDeliveryProfile,
+  type TtsMediaFormat,
+} from "@/lib/voice/tts-config";
 import { ElevenLabsScribeRealtimeStt } from "@/lib/voice/elevenlabs-scribe-realtime-stt";
 import { VoiceSessionLogger } from "@/lib/voice/voice-session-logger";
 
@@ -91,8 +96,12 @@ export type VoiceConversationSession = {
   conversationState?: CallConversationState;
 };
 
+export type TtsMediaPayloadMeta = {
+  format: TtsMediaFormat;
+};
+
 export type VoiceConversationTransport = {
-  sendMedia: (base64Payload: string) => void;
+  sendMedia: (base64Payload: string, meta?: TtsMediaPayloadMeta) => void;
   sendClear: () => void;
   /** Browser test: sentence about to be spoken (echo-filter context). */
   sendSpeakStart?: (text: string) => void;
@@ -241,6 +250,10 @@ export class VoiceConversationEngine {
       });
     }
 
+    const ttsConfig = getTtsConfigForProfile(this.getTtsProfile());
+    console.info(`[${this.logPrefix}] TTS config`, ttsConfig);
+    void this.sessionLogger?.log("tts_config", ttsConfig);
+
     this.endpointDebouncer = new CallEndpointDebouncer(
       this.voiceTuning,
       (text) => {
@@ -297,6 +310,10 @@ export class VoiceConversationEngine {
 
   private get logPrefix(): string {
     return this.options.logPrefix ?? "voice-engine";
+  }
+
+  private getTtsProfile(): TtsDeliveryProfile {
+    return this.options.finalizeMode === "test" ? "browser_test" : "telephony";
   }
 
   private attachScribeStt(session: VoiceConversationSession): void {
@@ -1171,15 +1188,27 @@ export class VoiceConversationEngine {
     let firstMedia = true;
 
     try {
-      await streamCallSpeechMulaw(
+      await streamCallSpeech(
         text,
         voiceId,
-        async (chunk) => {
+        async (chunk, meta) => {
           if (this.speakGeneration !== expectedGeneration) return;
           if (firstTts) {
             firstTts = false;
             metrics?.onFirstTtsByte?.();
           }
+
+          if (meta.format === "mp3") {
+            if (firstMedia) {
+              firstMedia = false;
+              metrics?.onFirstMedia?.();
+            }
+            this.options.transport.sendMedia(chunk.toString("base64"), {
+              format: "mp3",
+            });
+            return;
+          }
+
           await playMulawChunks(
             chunk,
             (payload) => {
@@ -1188,7 +1217,7 @@ export class VoiceConversationEngine {
                 firstMedia = false;
                 metrics?.onFirstMedia?.();
               }
-              this.options.transport.sendMedia(payload);
+              this.options.transport.sendMedia(payload, { format: "mulaw" });
             },
             {
               signal,
@@ -1196,8 +1225,11 @@ export class VoiceConversationEngine {
             },
           );
         },
-        this.session.agentSnapshot.language,
-        signal,
+        {
+          profile: this.getTtsProfile(),
+          language: this.session.agentSnapshot.language,
+          signal,
+        },
       );
     } catch (e) {
       if (!signal?.aborted && this.speakGeneration === expectedGeneration) {

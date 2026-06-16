@@ -14,6 +14,7 @@ import {
   isMediaStreamProxiedViaApp,
 } from "@/lib/voice/twilio-media-stream-server";
 import { getVoiceMediaStreamPath } from "@/lib/env/server";
+import { getTtsConfigForProfile } from "@/lib/voice/tts-config";
 
 const hostname = process.env.HOSTNAME ?? "0.0.0.0";
 const publicPort = Number.parseInt(process.env.PORT ?? "3000", 10);
@@ -188,6 +189,10 @@ async function main(): Promise<void> {
   });
 
   server.listen(publicPort, hostname, () => {
+    console.info("[bostel-voice] TTS config", {
+      telephony: getTtsConfigForProfile("telephony"),
+      browserTest: getTtsConfigForProfile("browser_test"),
+    });
     console.info(
       `[bostel-voice] Media Stream WSS on http://${hostname}:${publicPort}${getVoiceMediaStreamPath()}`,
     );

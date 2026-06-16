@@ -66,7 +66,3 @@ export function getVoiceOpenAiModel(): string {
     "gpt-4o-mini"
   );
 }
-
-export function getElevenLabsTtsModel(): string {
-  return process.env.ELEVENLABS_TTS_MODEL?.trim() || "eleven_flash_v2_5";
-}

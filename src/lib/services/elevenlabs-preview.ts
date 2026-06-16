@@ -1,8 +1,9 @@
 import { getElevenLabsClient } from "@/lib/integrations/elevenlabs";
+import type { TextToSpeechConvertRequestOutputFormat } from "@elevenlabs/elevenlabs-js/api";
 import { toElevenLabsTtsLanguageCode } from "@/lib/integrations/elevenlabs-flash-v25-languages";
 import { getServerEnv } from "@/lib/env/server";
 import { resolveConvaiTtsVoiceId } from "@/lib/services/elevenlabs-voice-resolve";
-import { getElevenLabsTtsModel } from "@/lib/voice/voice-tuning";
+import { getTtsConfigForProfile } from "@/lib/voice/tts-config";
 
 const PREVIEW_TEXT =
   "Hi — this is a quick sample so you can hear how this voice sounds for your agent.";
@@ -40,12 +41,14 @@ export async function synthesizePortalVoicePreview(
       };
     }
 
+    const config = getTtsConfigForProfile("preview");
     const client = getElevenLabsClient();
     const stream = await client.textToSpeech.convert(ttsVoiceId, {
       text: PREVIEW_TEXT,
-      modelId: getElevenLabsTtsModel(),
+      modelId: config.model,
       languageCode: toElevenLabsTtsLanguageCode(language),
-      outputFormat: "mp3_44100_128",
+      outputFormat:
+        config.outputFormat as TextToSpeechConvertRequestOutputFormat,
     });
     const body = Buffer.from(await new Response(stream).arrayBuffer());
     return { ok: true, body, contentType: "audio/mpeg" };

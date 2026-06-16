@@ -147,6 +147,22 @@ function extractionPatternsForField(field: string): RegExp[] {
     patterns.push(/(?:my\s+)?budget\s+is\s+(.+)/i);
     patterns.push(/budget\s+of\s+(.+)/i);
   }
+  if (
+    key.includes("time") ||
+    key.includes("callback") ||
+    key.includes("appointment") ||
+    key.includes("preferred")
+  ) {
+    patterns.push(
+      /(?:my\s+)?preferred\s+time(?:\s+for(?:\s+a)?\s+callback)?\s+is\s+(.+)/i,
+    );
+    patterns.push(
+      /(?:callback|appointment)(?:\s+time)?\s+(?:is|at|on)\s+(.+)/i,
+    );
+    patterns.push(
+      /\b((?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b[^.!?]{0,60})/i,
+    );
+  }
 
   return patterns;
 }

@@ -9,6 +9,7 @@ import {
 } from "@/lib/voice/test-call-session";
 import {
   VoiceConversationEngine,
+  type TtsMediaPayloadMeta,
   type VoiceConversationSession,
   type VoiceSessionStore,
 } from "@/lib/voice/voice-conversation-engine";
@@ -130,7 +131,8 @@ export class AgentTestMediaStreamHandler {
 
     this.engine = new VoiceConversationEngine({
       transport: {
-        sendMedia: (base64Payload) => this.sendMedia(base64Payload),
+        sendMedia: (base64Payload, meta) =>
+          this.sendMedia(base64Payload, meta),
         sendClear: () => this.sendClear(),
         sendSpeakStart: (text) => this.sendSpeakStart(text),
         sendTranscript: (payload) => this.sendTranscript(payload),
@@ -185,13 +187,16 @@ export class AgentTestMediaStreamHandler {
     );
   }
 
-  private sendMedia(base64Payload: string): void {
+  private sendMedia(base64Payload: string, meta?: TtsMediaPayloadMeta): void {
     if (!this.streamSid || this.ws.readyState !== WebSocket.OPEN) return;
     this.ws.send(
       JSON.stringify({
         event: "media",
         streamSid: this.streamSid,
-        media: { payload: base64Payload },
+        media: {
+          payload: base64Payload,
+          ...(meta?.format ? { format: meta.format } : {}),
+        },
       }),
     );
   }
