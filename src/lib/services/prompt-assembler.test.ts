@@ -36,6 +36,8 @@ describe("prompt-assembler voice blocks", () => {
     assert.ok(block.includes("calm, professional, and conversational"));
     assert.ok(!block.includes("warm, and human"));
     assert.ok(block.includes('Thanks, Andrew." not "Great, Andrew!'));
+    assert.ok(block.includes('"I\'m here."'));
+    assert.ok(block.includes('never "I\'m here!"'));
   });
 
   it("buildCollectWorkflowBlock lists fields in order", () => {

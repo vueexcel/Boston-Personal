@@ -2,7 +2,7 @@ import { z } from "zod";
 import { getOpenAIClient } from "@/lib/integrations/openai";
 import { getServerEnv } from "@/lib/env/server";
 
-const MAX_SOURCE_CHARS = 80_000;
+const MAX_SOURCE_CHARS = 120_000;
 
 const extractedDocumentSchema = z.object({
   section: z.string().trim().min(1),
@@ -33,9 +33,9 @@ export class KnowledgeFileExtractionError extends Error {
   }
 }
 
-const EXTRACTION_SYSTEM = `You are a business knowledge extractor preparing reference material for voice AI phone agents.
+const EXTRACTION_SYSTEM = `You are a business knowledge extractor preparing comprehensive reference material for voice AI phone agents.
 
-Your job is to read the provided source document and extract ONLY information explicitly stated in the source. Never invent, assume, or hallucinate facts.
+Your job is to read the provided source document and extract all relevant business information explicitly stated in the source. Capture deeper detail, not just high-level summaries. Never invent, assume, or hallucinate facts.
 
 Return JSON only with this shape:
 {
@@ -46,27 +46,34 @@ Return JSON only with this shape:
   ]
 }
 
-SECTIONS — create one document per non-empty section (skip sections with no source evidence):
-1. "Company Overview" (sortOrder 1) — company name, mission/vision, history, industries served, locations, business hours, languages supported
-2. "Contact Information" (sortOrder 2) — phone numbers, email addresses, WhatsApp numbers, office addresses
-3. "Products and Services" (sortOrder 3) — products, services, pricing only if explicitly stated
-4. "Business Policies" (sortOrder 4) — refund, cancellation, shipping, return, warranty, privacy policy, terms of service
-5. "Voice AI Boundaries" (sortOrder 5) — REQUIRED. List what the voice agent must NOT promise or guarantee. Include explicit limitations from policies AND gaps (e.g. "Refund policy not specified — do not offer refunds"). This section helps the agent know exactly what it can and cannot promise.
-6. "FAQs" (sortOrder 6) — question/answer pairs found in the source
-7. "Appointment and Booking" (sortOrder 7) — available services, time slots, booking rules, rescheduling policy, cancellation policy for bookings
-8. "Location Information" (sortOrder 8) — branch locations, directions, parking, service areas, delivery areas
+SECTIONS — create one document per distinct business topic or section of useful content. Use as many sections as necessary to preserve explicit detail and context from the source. Skip sections with no source evidence.
+1. "Company Overview" (sortOrder 1) — company name, mission/vision, history, industries served, headquarters, business hours, languages supported, team or brand positioning
+2. "Contact Information" (sortOrder 2) — phone numbers, email addresses, WhatsApp numbers, office addresses, support channels, response expectations
+3. "Products and Services" (sortOrder 3) — product and service descriptions, key features, service categories, eligibility rules, delivery options, memberships, add-ons
+4. "Pricing and Fees" (sortOrder 4) — explicit prices, fees, payment options, deposits, installment rules, refunds tied to pricing, and any costs mentioned
+5. "Business Policies" (sortOrder 5) — refund, cancellation, shipping, returns, warranty, privacy, terms, guarantees, legal disclaimers, data handling policies
+6. "Appointment and Booking" (sortOrder 6) — available services, booking process, availability, time slots, rescheduling rules, cancellation policy for appointments and bookings
+7. "Location and Service Areas" (sortOrder 7) — branch locations, directions, parking, service area coverage, delivery areas, regional restrictions
+8. "FAQs" (sortOrder 8) — question/answer pairs found in the source
+9. "Technical or Operational Details" (sortOrder 9) — process steps, system requirements, product specifications, installation details, support workflows
+10. "Legal and Compliance" (sortOrder 10) — terms of service, privacy and security, regulatory disclosures, licensing, age restrictions, licensing restrictions
+11. "Voice AI Boundaries" (sortOrder 11) — REQUIRED. List what the voice agent must NOT promise or guarantee. Include explicit limitations from policies AND gaps (e.g. "Refund policy not specified — do not offer refunds"). This section helps the agent know exactly what it can and cannot promise.
+12. "Additional Information" (sortOrder 12) — any other useful business facts not covered above, including promotions, customer testimonials, lead capture instructions, or operational notes
 
 FORMATTING RULES for each document "content":
 - Use concise markdown: bullet lists and short sentences suitable for a phone agent
+- Preserve explicit detail and context from the source; do not over-compress content into a single sentence unless the source is already brief
 - For CSV sources: preserve key column headers and row data as structured bullets
 - Do not include section titles inside content (the section field is the title)
 - Omit empty sections entirely — do not create placeholder documents
+- Use bullets for lists, short descriptive sentences for facts, and group related items clearly
 
 STRICT RULES:
 - suggestedName: best company/business name from source, or null
 - suggestedDescription: one-sentence summary of the business, or null
 - Never fabricate contact details, policies, hours, or prices
-- Voice AI Boundaries must always be included (even if only listing unknowns)`;
+- Voice AI Boundaries must always be included (even if only listing unknowns)
+- If a topic is explicitly described in the source but does not fit an existing category, place it under "Additional Information" rather than dropping it.`;
 
 function truncateSourceText(text: string): string {
   if (text.length <= MAX_SOURCE_CHARS) return text;

@@ -2,7 +2,10 @@ import { getElevenLabsClient } from "@/lib/integrations/elevenlabs";
 import type { TextToSpeechConvertRequestOutputFormat } from "@elevenlabs/elevenlabs-js/api";
 import { toElevenLabsTtsLanguageCode } from "@/lib/integrations/elevenlabs-flash-v25-languages";
 import { getServerEnv } from "@/lib/env/server";
-import { prepareTextForTts } from "@/lib/voice/tts-text";
+import {
+  prepareTextForTts,
+  shouldSoftenExclamationsForProfile,
+} from "@/lib/voice/tts-text";
 import {
   getTtsConfigForProfile,
   getTtsMediaFormat,
@@ -62,7 +65,9 @@ export async function streamCallSpeech(
     throw new Error("ELEVENLABS_API_KEY is not configured");
   }
 
-  const prepared = prepareTextForTts(text);
+  const prepared = prepareTextForTts(text, {
+    softenExclamations: shouldSoftenExclamationsForProfile(options.profile),
+  });
   if (!prepared) {
     throw new Error("TTS text is empty");
   }
