@@ -1538,7 +1538,7 @@ export function VoiceAgentBuilder({ tenantId, agent }: VoiceAgentBuilderProps) {
 
               {sectionCard(
                 "Language / Accent",
-                "Speech language for live calls (ElevenLabs Flash v2.5 TTS), Scribe STT, and voice test when prepared. The LLM is instructed to respond in this language. The greeting above is stored as written; it is translated automatically when a call or test starts if a non-English language is selected.",
+                "Default language for TTS, STT, and greetings. The agent will match the caller's language when they clearly speak another language. The greeting above is stored as written; it is translated automatically when a call or test starts if a non-English language is selected.",
                 <>
                   <Select
                     value={language}

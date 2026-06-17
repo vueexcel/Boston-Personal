@@ -136,6 +136,7 @@ export class AgentTestMediaStreamHandler {
         sendClear: () => this.sendClear(),
         sendSpeakStart: (text) => this.sendSpeakStart(text),
         sendTranscript: (payload) => this.sendTranscript(payload),
+        sendCallEnded: (reason) => this.sendCallEnded(reason),
         close: () => this.ws.close(),
       },
       store: testSessionStore,
@@ -173,6 +174,17 @@ export class AgentTestMediaStreamHandler {
         event: "transcript",
         streamSid: this.streamSid,
         transcript: payload,
+      }),
+    );
+  }
+
+  private sendCallEnded(reason: string): void {
+    if (this.ws.readyState !== WebSocket.OPEN) return;
+    this.ws.send(
+      JSON.stringify({
+        event: "call_ended",
+        streamSid: this.streamSid,
+        reason,
       }),
     );
   }

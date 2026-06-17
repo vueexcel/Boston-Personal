@@ -34,7 +34,6 @@ export type ProductionVoiceCallProps = {
   sessionId: string;
   sessionToken: string;
   sttClientConfig: ScribeClientConnectConfig;
-  onEnded?: () => void;
 };
 
 type TranscriptLine = {
@@ -50,9 +49,9 @@ export function ProductionVoiceCall({
   sessionId,
   sessionToken,
   sttClientConfig,
-  onEnded,
 }: ProductionVoiceCallProps) {
   const [status, setStatus] = React.useState<string>("disconnected");
+  const [endReason, setEndReason] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [active, setActive] = React.useState(false);
   const [connecting, setConnecting] = React.useState(false);
@@ -64,6 +63,7 @@ export function ProductionVoiceCall({
   const scheduledSourcesRef = React.useRef<AudioBufferSourceNode[]>([]);
   const streamSidRef = React.useRef(`test-${sessionId.slice(0, 8)}`);
   const scribeDisconnectRef = React.useRef<(() => void) | null>(null);
+  const disconnectedRef = React.useRef(false);
 
   const agentPlaybackActiveRef = React.useRef(false);
   const agentEchoContextRef = React.useRef("");
@@ -123,6 +123,25 @@ export function ProductionVoiceCall({
     }, PLAYBACK_END_TAIL_MS);
   }, []);
 
+  const stopPlaybackRef = React.useRef<(() => void) | null>(null);
+
+  const stopPlayback = React.useCallback(() => {
+    for (const source of scheduledSourcesRef.current) {
+      try {
+        source.stop();
+      } catch {
+        // ignore
+      }
+    }
+    scheduledSourcesRef.current = [];
+    if (audioContextRef.current) {
+      playbackTimeRef.current = audioContextRef.current.currentTime;
+    }
+    schedulePlaybackEnded();
+  }, [schedulePlaybackEnded]);
+
+  stopPlaybackRef.current = stopPlayback;
+
   const tryBargeInFromStt = React.useCallback(
     (text: string, final: boolean) => {
       if (!agentPlaybackActiveRef.current) {
@@ -148,8 +167,6 @@ export function ProductionVoiceCall({
     [sendBargeInSignal, sendCallerSpeech],
   );
 
-  const stopPlaybackRef = React.useRef<(() => void) | null>(null);
-
   const scribe = useScribe({
     modelId: sttClientConfig.modelId,
     languageCode: sttClientConfig.languageCode,
@@ -174,22 +191,47 @@ export function ProductionVoiceCall({
 
   scribeDisconnectRef.current = scribe.disconnect;
 
-  const stopPlayback = React.useCallback(() => {
-    for (const source of scheduledSourcesRef.current) {
-      try {
-        source.stop();
-      } catch {
-        // ignore
-      }
-    }
-    scheduledSourcesRef.current = [];
-    if (audioContextRef.current) {
-      playbackTimeRef.current = audioContextRef.current.currentTime;
-    }
-    schedulePlaybackEnded();
-  }, [schedulePlaybackEnded]);
+  const disconnectCall = React.useCallback(
+    (options?: { sendStop?: boolean; nextStatus?: string; reason?: string }) => {
+      if (disconnectedRef.current) return;
+      disconnectedRef.current = true;
 
-  stopPlaybackRef.current = stopPlayback;
+      if (playbackEndTimerRef.current) {
+        clearTimeout(playbackEndTimerRef.current);
+        playbackEndTimerRef.current = null;
+      }
+      agentPlaybackActiveRef.current = false;
+      agentEchoContextRef.current = "";
+      scribeDisconnectRef.current?.();
+
+      const ws = wsRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        if (options?.sendStop) {
+          ws.send(
+            JSON.stringify({ event: "stop", streamSid: streamSidRef.current }),
+          );
+        }
+        ws.close();
+      }
+      wsRef.current = null;
+
+      stopPlayback();
+      void audioContextRef.current?.close();
+      audioContextRef.current = null;
+      setActive(false);
+      setStatus(options?.nextStatus ?? "disconnected");
+      if (options?.reason) {
+        setEndReason(options.reason);
+        if (process.env.NODE_ENV === "development") {
+          console.info("[voice-test] call ended:", options.reason);
+        }
+      }
+    },
+    [stopPlayback],
+  );
+
+  const disconnectCallRef = React.useRef(disconnectCall);
+  disconnectCallRef.current = disconnectCall;
 
   const scheduleMp3Playback = React.useCallback(
     async (base64Payload: string) => {
@@ -263,34 +305,13 @@ export function ProductionVoiceCall({
     [markAgentPlaybackActive, schedulePlaybackEnded],
   );
 
-  const teardown = React.useCallback(() => {
-    if (playbackEndTimerRef.current) {
-      clearTimeout(playbackEndTimerRef.current);
-      playbackEndTimerRef.current = null;
-    }
-    agentPlaybackActiveRef.current = false;
-    agentEchoContextRef.current = "";
-    scribeDisconnectRef.current?.();
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(
-        JSON.stringify({ event: "stop", streamSid: streamSidRef.current }),
-      );
-      wsRef.current.close();
-    }
-    wsRef.current = null;
-    stopPlayback();
-    void audioContextRef.current?.close();
-    audioContextRef.current = null;
-    setActive(false);
-    setStatus("disconnected");
-    onEnded?.();
-  }, [onEnded, stopPlayback]);
-
   const startCall = async () => {
     if (connecting || active) return;
     setError(null);
+    setEndReason(null);
     setConnecting(true);
     setTranscript([]);
+    disconnectedRef.current = false;
 
     try {
       const ctx = new AudioContext();
@@ -325,6 +346,7 @@ export function ProductionVoiceCall({
       ws.onmessage = (event) => {
         let msg: {
           event?: string;
+          reason?: string;
           media?: { payload?: string; format?: "mulaw" | "mp3" };
           speak?: { text?: string };
           transcript?: { role: "user" | "assistant"; text: string };
@@ -335,7 +357,12 @@ export function ProductionVoiceCall({
           return;
         }
 
-        if (msg.event === "speak_start" && msg.speak?.text) {
+        if (msg.event === "call_ended") {
+          disconnectCallRef.current({
+            nextStatus: "ended",
+            reason: msg.reason ?? "server",
+          });
+        } else if (msg.event === "speak_start" && msg.speak?.text) {
           agentEchoContextRef.current = appendAgentEchoContext(
             agentEchoContextRef.current,
             msg.speak.text,
@@ -375,7 +402,12 @@ export function ProductionVoiceCall({
       };
 
       ws.onclose = () => {
-        teardown();
+        if (!disconnectedRef.current) {
+          disconnectCallRef.current({
+            nextStatus: "disconnected",
+            reason: "websocket_closed",
+          });
+        }
       };
 
       const { token } = await postAgentTestScribeToken(tenantId, agentId, {
@@ -411,26 +443,35 @@ export function ProductionVoiceCall({
         setError(message);
       }
       setStatus("error");
-      teardown();
+      disconnectCallRef.current({ reason: "start_failed" });
     } finally {
       setConnecting(false);
     }
   };
 
   const endCall = () => {
-    teardown();
+    disconnectCall({ sendStop: true, nextStatus: "ended", reason: "user" });
   };
 
   React.useEffect(() => {
     return () => {
-      teardown();
+      disconnectCallRef.current({ sendStop: true, reason: "unmount" });
     };
-  }, [teardown]);
+  }, []);
+
+  const canStart = !active && !connecting && status !== "listening";
 
   return (
     <div className="rounded-lg border border-slate-100 bg-slate-50/80 p-4 space-y-3">
       <p className="text-xs text-slate-500">
         Connection: <span className="font-medium text-slate-700">{status}</span>
+        {endReason ? (
+          <>
+            {" "}
+            · End reason:{" "}
+            <span className="font-medium text-slate-700">{endReason}</span>
+          </>
+        ) : null}
         {scribe.isConnected ? (
           <>
             {" "}
@@ -440,7 +481,7 @@ export function ProductionVoiceCall({
         ) : null}
       </p>
       <div className="flex flex-wrap gap-2">
-        {!active ? (
+        {canStart ? (
           <Button
             type="button"
             className="bg-slate-900 hover:bg-slate-800"
@@ -449,10 +490,16 @@ export function ProductionVoiceCall({
           >
             {connecting ? (
               <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+            ) : status === "ended" ? (
+              <Mic className="mr-1.5 h-4 w-4" />
             ) : (
               <Mic className="mr-1.5 h-4 w-4" />
             )}
-            {connecting ? "Connecting…" : "Start voice test"}
+            {connecting
+              ? "Connecting…"
+              : status === "ended"
+                ? "Start new call"
+                : "Start voice test"}
           </Button>
         ) : (
           <Button type="button" variant="destructive" onClick={endCall}>
@@ -464,6 +511,11 @@ export function ProductionVoiceCall({
       {error ? (
         <p className="text-sm text-red-600" role="alert">
           {error}
+        </p>
+      ) : null}
+      {status === "ended" && !error ? (
+        <p className="text-sm text-slate-600" role="status">
+          Call ended. You can start a new call with the same prepared session.
         </p>
       ) : null}
       {scribe.partialTranscript ? (

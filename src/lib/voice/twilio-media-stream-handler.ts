@@ -148,6 +148,7 @@ export class TwilioMediaStreamHandler {
       transport: {
         sendMedia: (base64Payload) => this.sendMedia(base64Payload),
         sendClear: () => this.sendClear(),
+        sendCallEnded: (reason) => this.sendCallEnded(reason),
         close: () => this.ws.close(),
       },
       store: twilioSessionStore,
@@ -164,6 +165,17 @@ export class TwilioMediaStreamHandler {
     });
 
     await this.engine.start(callSid);
+  }
+
+  private sendCallEnded(reason: string): void {
+    if (!this.streamSid || this.ws.readyState !== WebSocket.OPEN) return;
+    this.ws.send(
+      JSON.stringify({
+        event: "call_ended",
+        streamSid: this.streamSid,
+        reason,
+      }),
+    );
   }
 
   private sendClear(): void {

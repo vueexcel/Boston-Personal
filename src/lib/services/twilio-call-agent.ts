@@ -6,7 +6,7 @@ import { resolveConvaiTtsVoiceId } from "@/lib/services/elevenlabs-voice-resolve
 import { getAgentForTenant } from "@/lib/services/agents";
 import { resolveLocalizedGreeting } from "@/lib/services/greeting-translate";
 import { screenRuntimeUserMessage } from "@/lib/prompt-content-safety-patterns";
-import { buildPhoneConversationStyleBlock } from "@/lib/services/prompt-assembler";
+import { buildPhoneConversationStyleBlock, buildSupportedLanguagesBlock } from "@/lib/services/prompt-assembler";
 import { SentenceBuffer } from "@/lib/voice/sentence-buffer";
 import { TtsSentenceMerger } from "@/lib/voice/tts-text";
 import {
@@ -103,6 +103,7 @@ export function buildVoiceSystemPrompt(
   const parts = [
     snapshot.systemPrompt,
     buildPhoneConversationStyleBlock(),
+    buildSupportedLanguagesBlock(),
     buildVoicePersonaBlock(snapshot),
     collectedBlock,
     stateBlock,

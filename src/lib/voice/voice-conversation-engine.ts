@@ -54,7 +54,6 @@ import {
   getClarificationFallbackPhrase,
   getErrorRetryPhrase,
   getInactivityFarewellPhrase,
-  getLanguageRepromptPhrase,
   getMaxTurnsFarewellPhrase,
   getTimeLimitFarewellPhrase,
 } from "@/lib/voice/call-phrases";
@@ -69,10 +68,6 @@ import {
   parseSpelledLetters,
   shouldSkipEntityCaptureForIntent,
 } from "@/lib/voice/entity-capture";
-import {
-  isUtteranceLanguageMismatch,
-  shouldUseLanguageReprompt,
-} from "@/lib/voice/utterance-language";
 import { getVoiceTuningConfig } from "@/lib/voice/voice-tuning";
 import {
   getTtsConfigForProfile,
@@ -110,6 +105,7 @@ export type VoiceConversationTransport = {
     text: string;
     final?: boolean;
   }) => void;
+  sendCallEnded?: (reason: string) => void;
   close: () => void;
 };
 
@@ -148,8 +144,6 @@ type EngineState =
 
 const MAX_TURNS = 40;
 const MAX_SCRIBE_RECONNECTS = 5;
-const MAX_UNCLEAR_UTTERANCES = 3;
-const MAX_LANGUAGE_REPROMPTS = 2;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -181,9 +175,7 @@ export class VoiceConversationEngine {
   private readonly bargeInCollector: BargeInUtteranceCollector;
   private inactivityTimer: ReturnType<typeof setTimeout> | null = null;
   private inactivityFired = false;
-  private languageCheckSuppressed = false;
   private unclearUtteranceCount = 0;
-  private languageRepromptCount = 0;
   private pendingEntityConfirm: {
     field: string;
     value: string;
@@ -408,7 +400,7 @@ export class VoiceConversationEngine {
     const language = this.session?.agentSnapshot.language;
     const farewell = getInactivityFarewellPhrase(language);
     void this.sessionLogger?.log("inactivity_hangup", { farewell });
-    await this.endCall(farewell);
+    await this.endCall(farewell, { reason: "inactivity" });
   }
 
   private async enterListening(reason: string): Promise<void> {
@@ -674,27 +666,6 @@ export class VoiceConversationEngine {
       }
     }
 
-    const language = this.session.agentSnapshot.language;
-    const answeringCollect =
-      Boolean(nextField) &&
-      isShortEntityAnswer(text) &&
-      text.split(/\s+/).length <= 3;
-
-    if (await shouldUseLanguageReprompt(text, language)) {
-      if (this.languageRepromptCount < MAX_LANGUAGE_REPROMPTS) {
-        await this.handleUnclearUtterance(text, "language");
-        return;
-      }
-    } else if (
-      await isUtteranceLanguageMismatch(text, language, {
-        answeringCollectField: answeringCollect,
-        suppressAfterSuccessfulTurn: this.languageCheckSuppressed,
-      })
-    ) {
-      await this.handleUnclearUtterance(text, "clarification");
-      return;
-    }
-
     if (this.processingUtterance) {
       this.queuePendingTranscript(text);
       this.interruptPlayback("new-utterance-queued");
@@ -713,58 +684,6 @@ export class VoiceConversationEngine {
     }
 
     await this.runTurn(text);
-  }
-
-  private async handleUnclearUtterance(
-    userText: string,
-    kind: "clarification" | "language",
-  ): Promise<void> {
-    if (!this.session || this.processingUtterance) return;
-
-    if (kind === "language") {
-      this.languageRepromptCount += 1;
-    } else {
-      this.unclearUtteranceCount += 1;
-      if (this.unclearUtteranceCount > MAX_UNCLEAR_UTTERANCES) {
-        await this.runTurn(userText);
-        return;
-      }
-    }
-
-    this.processingUtterance = true;
-    this.endpointDebouncer?.reset();
-    this.bargeInCollector.reset();
-    this.languageCheckSuppressed = false;
-
-    const phrase =
-      kind === "language"
-        ? getLanguageRepromptPhrase(this.session.agentSnapshot.language)
-        : getClarificationFallbackPhrase(this.session.agentSnapshot);
-
-    void this.sessionLogger?.log("unclear_utterance", {
-      userText,
-      kind,
-      phrase,
-    });
-
-    const gen = this.speakGeneration;
-    await this.speakSentence(phrase, gen);
-
-    if (this.speakGeneration === gen && this.session) {
-      this.session.messages.push({ role: "user", content: userText });
-      this.session.messages.push({ role: "assistant", content: phrase });
-      await this.persistSessionState();
-      this.options.transport.sendTranscript?.({
-        role: "assistant",
-        text: phrase,
-        final: true,
-      });
-    }
-
-    this.processingUtterance = false;
-    await this.enterListening(
-      kind === "language" ? "language-reprompt" : "clarification",
-    );
   }
 
   private async startEntityConfirm(
@@ -896,7 +815,7 @@ export class VoiceConversationEngine {
     );
     if (updated) this.session = updated;
 
-    await this.endCall(farewell, { skipStateSet: true });
+    await this.endCall(farewell, { skipStateSet: true, reason: "goodbye" });
   }
 
   private async runTurn(transcript: string): Promise<void> {
@@ -912,6 +831,7 @@ export class VoiceConversationEngine {
     if (this.session.turnCount >= MAX_TURNS) {
       await this.endCall(
         getMaxTurnsFarewellPhrase(this.session.agentSnapshot.language),
+        { reason: "max_turns" },
       );
       return;
     }
@@ -921,6 +841,7 @@ export class VoiceConversationEngine {
     if (elapsedSec >= this.session.agentSnapshot.maxDurationSec) {
       await this.endCall(
         getTimeLimitFarewellPhrase(this.session.agentSnapshot.language),
+        { reason: "time_limit" },
       );
       return;
     }
@@ -1035,7 +956,6 @@ export class VoiceConversationEngine {
           ),
         };
         await this.options.store.saveSession(this.session);
-        this.languageCheckSuppressed = true;
         void this.sessionLogger?.log("collected_info_updated", {
           collectedInfo: this.session.collectedInfo,
           extraInformation: this.session.extraInformation,
@@ -1246,9 +1166,14 @@ export class VoiceConversationEngine {
     }
   }
 
+  private closeTransport(reason: string): void {
+    this.options.transport.sendCallEnded?.(reason);
+    this.options.transport.close();
+  }
+
   private async endCall(
     message: string,
-    options?: { skipStateSet?: boolean },
+    options?: { skipStateSet?: boolean; reason?: string },
   ): Promise<void> {
     this.inactivityFired = true;
     this.clearInactivityTimer();
@@ -1258,7 +1183,7 @@ export class VoiceConversationEngine {
     this.interruptPlayback("end-call");
     const gen = this.speakGeneration;
     await this.speakSentence(message, gen);
-    this.options.transport.close();
+    this.closeTransport(options?.reason ?? "hangup");
   }
 
   private async cleanup(_reason: string): Promise<void> {

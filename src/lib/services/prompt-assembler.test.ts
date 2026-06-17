@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  buildBehaviourBlockFromConfig,
   buildCollectWorkflowBlock,
   buildPhoneConversationStyleBlock,
+  buildSupportedLanguagesBlock,
   DEFAULT_BEHAVIOUR_RULES,
 } from "@/lib/services/prompt-assembler";
+import { defaultAgentPortalConfig } from "@/lib/tenant-portal/agent-config-v1";
 import {
   buildVoicePersonaBlock,
   type CallAgentSnapshot,
@@ -60,6 +63,30 @@ describe("prompt-assembler voice blocks", () => {
     assert.ok(DEFAULT_BEHAVIOUR_RULES.includes("STRICT HOURS & DAYS ENFORCEMENT"));
     assert.ok(DEFAULT_BEHAVIOUR_RULES.includes("they stated"));
     assert.ok(DEFAULT_BEHAVIOUR_RULES.includes("do not mention Sunday"));
+  });
+
+  it("buildBehaviourBlockFromConfig uses multilingual default language guidance", () => {
+    const block = buildBehaviourBlockFromConfig(defaultAgentPortalConfig(), {
+      greeting: "Hello",
+      voiceId: "voice_123",
+      voiceProviderId: "elevenlabs",
+      language: "en",
+    });
+    assert.ok(block.includes("Default language:"));
+    assert.ok(block.includes("respond in that language"));
+    assert.ok(block.includes("answer yes and continue in that language"));
+    assert.ok(!block.includes("Respond ONLY"));
+    assert.ok(!block.includes("Never switch languages"));
+  });
+
+  it("buildSupportedLanguagesBlock lists capabilities without language-specific code", () => {
+    const block = buildSupportedLanguagesBlock();
+    assert.ok(block.includes("# Supported voice languages"));
+    assert.ok(block.includes("Never claim you cannot speak a language"));
+    assert.ok(block.includes("Match the caller's language"));
+    assert.ok(block.includes("English"));
+    assert.ok(block.includes("French"));
+    assert.ok(block.includes("Hindi"));
   });
 });
 

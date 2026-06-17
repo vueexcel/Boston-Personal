@@ -1,4 +1,5 @@
 import {
+  ELEVEN_FLASH_V25_LANGUAGES,
   flashV25LanguageLabel,
   toElevenLabsTtsLanguageCode,
 } from "@/lib/integrations/elevenlabs-flash-v25-languages";
@@ -114,6 +115,22 @@ export function buildPhoneConversationStyleBlock(): string {
     "- Do not end the call on hesitation or mid-correction — only when they clearly say goodbye.",
     "- When they clearly say goodbye, reply with a brief polite farewell only.",
     "- If the caller shares extra details not in COLLECT (preferences, constraints, callback times), acknowledge briefly; they will be logged separately.",
+  ].join("\n");
+}
+
+/** Languages the voice stack can speak via ElevenLabs Flash v2.5 TTS. */
+export function buildSupportedLanguagesBlock(): string {
+  const languageList = ELEVEN_FLASH_V25_LANGUAGES.map((lang) => lang.label).join(
+    ", ",
+  );
+  return [
+    "# Supported voice languages",
+    "",
+    `You can speak and understand these languages (TTS supports all of them): ${languageList}.`,
+    "- Never claim you cannot speak a language on this list.",
+    "- Match the caller's language from what they say in the transcript.",
+    "- If the caller asks to use a different supported language, confirm and continue in that language.",
+    "- Use the agent's configured default language until the caller clearly uses another.",
   ].join("\n");
 }
 
@@ -256,9 +273,9 @@ export function buildBehaviourBlockFromConfig(
       const code = toElevenLabsTtsLanguageCode(fields.language);
       const label = flashV25LanguageLabel(fields.language);
       return [
-        `Language: ${label} (${code}).`,
-        `Respond ONLY in ${label}. Never switch languages.`,
-        `If the caller speaks another language, say you cannot understand and ask them to speak in ${label}.`,
+        `Default language: ${label} (${code}). Start in ${label} unless the caller clearly uses another language.`,
+        `If the caller speaks another language fluently, respond in that language. Do not ask them to switch back to ${label}.`,
+        `If the caller asks whether you speak a supported language, answer yes and continue in that language — never refuse.`,
       ].join(" ");
     })(),
   ]

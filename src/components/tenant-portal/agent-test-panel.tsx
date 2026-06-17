@@ -176,9 +176,9 @@ export function AgentTestPanel({
     }
   };
 
-  const endVoiceTest = () => {
+  const endVoiceTest = React.useCallback(() => {
     setVoiceSession(null);
-  };
+  }, []);
 
   return (
     <div className="space-y-4">
@@ -377,7 +377,6 @@ export function AgentTestPanel({
               sessionId={voiceSession.sessionId}
               sessionToken={voiceSession.sessionToken}
               sttClientConfig={voiceSession.sttClientConfig}
-              onEnded={endVoiceTest}
             />
           ) : null}
         </div>

@@ -1,44 +1,8 @@
 import {
-  flashV25LanguageLabel,
   toElevenLabsTtsLanguageCode,
   type ElevenFlashV25LanguageCode,
 } from "@/lib/integrations/elevenlabs-flash-v25-languages";
 import type { CallAgentSnapshot } from "@/lib/services/twilio-call-agent";
-
-const LANGUAGE_REPROMPT: Record<ElevenFlashV25LanguageCode, string> = {
-  en: "I'm not able to understand. Can you please speak in English?",
-  es: "No puedo entenderte. ¿Puedes hablar en español, por favor?",
-  fr: "Je n'arrive pas à comprendre. Pouvez-vous parler en français, s'il vous plaît ?",
-  de: "Ich kann Sie nicht verstehen. Können Sie bitte auf Deutsch sprechen?",
-  it: "Non riesco a capire. Può parlare in italiano, per favore?",
-  pt: "Não consigo entender. Pode falar em português, por favor?",
-  nl: "Ik kan u niet verstaan. Kunt u alstublieft Nederlands spreken?",
-  pl: "Nie rozumiem. Czy może Pan/Pani mówić po polsku?",
-  ru: "Я не могу вас понять. Не могли бы вы говорить по-русски?",
-  ja: "理解できませんでした。日本語で話していただけますか？",
-  zh: "我没听明白。请您说中文好吗？",
-  ko: "이해하지 못했습니다. 한국어로 말씀해 주시겠어요?",
-  hi: "मैं समझ नहीं पा रहा हूँ। क्या आप कृपया हिंदी में बोल सकते हैं?",
-  ar: "لم أفهم. هل يمكنك التحدث بالعربية من فضلك؟",
-  tr: "Sizi anlayamadım. Lütfen Türkçe konuşabilir misiniz?",
-  sv: "Jag förstår inte. Kan du prata svenska, tack?",
-  bg: "Не ви разбирам. Моля, говорете на български.",
-  ro: "Nu vă înțeleg. Puteți vorbi în română, vă rog?",
-  cs: "Nerozumím. Můžete prosím mluvit česky?",
-  el: "Δεν καταλαβαίνω. Μπορείτε να μιλήσετε στα ελληνικά, παρακαλώ;",
-  fi: "En ymmärrä. Voitko puhua suomea, kiitos?",
-  hr: "Ne razumijem. Možete li govoriti hrvatski, molim?",
-  ms: "Saya tidak faham. Bolehkah anda bercakap dalam bahasa Melayu?",
-  sk: "Nerozumiem. Môžete hovoriť po slovensky, prosím?",
-  da: "Jeg forstår ikke. Kan du tale dansk, tak?",
-  ta: "எனக்குப் புரியவில்லை. தயவுசெய்து தமிழில் பேச முடியுமா?",
-  uk: "Я вас не розумію. Чи не могли б ви говорити українською?",
-  hu: "Nem értem. Kérem, beszéljen magyarul.",
-  no: "Jeg forstår ikke. Kan du snakke norsk, takk?",
-  vi: "Tôi không hiểu. Bạn có thể nói tiếng Việt được không?",
-  id: "Saya tidak mengerti. Bisakah Anda berbicara dalam bahasa Indonesia?",
-  fil: "Hindi ko maintindihan. Maaari po bang magsalita sa Filipino?",
-};
 
 const INACTIVITY_FAREWELL: Record<ElevenFlashV25LanguageCode, string> = {
   en: "I haven't heard from you. Thanks for calling. Goodbye.",
@@ -186,17 +150,6 @@ function phraseForLanguage(
 ): string {
   const code = toElevenLabsTtsLanguageCode(language);
   return map[code] ?? map.en;
-}
-
-/** Fixed reprompt when caller speech does not match the agent's configured language. */
-export function getLanguageRepromptPhrase(language?: string | null): string {
-  const code = toElevenLabsTtsLanguageCode(language);
-  const label = flashV25LanguageLabel(language);
-  const template = phraseForLanguage(LANGUAGE_REPROMPT, language);
-  if (code === "en") {
-    return template;
-  }
-  return template.includes(label) ? template : `${template}`;
 }
 
 export function getInactivityFarewellPhrase(language?: string | null): string {
